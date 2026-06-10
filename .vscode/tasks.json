@@ -1,0 +1,49 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Start local preview on 5179",
+      "type": "shell",
+      "command": "PORT=5179 /Users/kukudejie/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node server.js",
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": {
+          "regexp": "^$",
+          "file": 1,
+          "location": 2,
+          "message": 3
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "Local Media Saver is running",
+          "endsPattern": "Local Media Saver is running"
+        }
+      },
+      "options": {
+        "cwd": "${workspaceFolder}/jesper-project"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Search download language",
+      "type": "shell",
+      "command": "rg -n \"下载|解析下载|SnapAny|万能下载\" public README.md AGENTS.md ANTIGRAVITY_HANDOFF.md",
+      "options": {
+        "cwd": "${workspaceFolder}/jesper-project"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run UX copy audit",
+      "type": "shell",
+      "command": "/Users/kukudejie/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node tools/audit.mjs",
+      "options": {
+        "cwd": "${workspaceFolder}/jesper-project"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

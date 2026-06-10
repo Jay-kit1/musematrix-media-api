@@ -1,0 +1,16 @@
+{
+  "name": "local-media-saver",
+  "version": "1.0.0",
+  "description": "A local SnapAny-style media link parser demo.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "media",
+    "downloader",
+    "local"
+  ],
+  "author": "Jesper",
+  "license": "MIT"
+}

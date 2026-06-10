@@ -1,0 +1,10 @@
+{
+  "files.associations": {
+    "AGENTS.md": "markdown",
+    "ANTIGRAVITY_HANDOFF.md": "markdown"
+  },
+  "search.exclude": {
+    "**/.git": true
+  },
+  "editor.formatOnSave": false
+}

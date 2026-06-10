@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SnapLocal - 万能视频图片解析下载</title>
+    <meta name="description" content="SnapAny 风格的本地版：一键快速、免费下载网页中的视频和图片，支持 1000+ 平台。">
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="回到首页">
+        <span class="brand-mark">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/></svg>
+        </span>
+        <span>SnapLocal</span>
+      </a>
+
+      <nav class="platform-nav" aria-label="常用平台">
+        <a href="#parser">TikTok</a>
+        <a href="#parser">YouTube</a>
+        <a href="#parser">哔哩哔哩</a>
+        <a href="#parser">Twitter / X</a>
+        <a href="#parser">Pinterest</a>
+        <a href="#platforms">更多</a>
+      </nav>
+
+      <div class="header-actions">
+        <a class="header-link" href="#desktop">下载客户端</a>
+        <button class="ghost-button" type="button" id="themeToggle">深色</button>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="hero-inner">
+          <a class="notice" href="#desktop">
+            <span class="notice-badge">New</span>
+            <span class="notice-text">新版客户端重磅上线，支持批量下载和格式转换</span>
+          </a>
+
+          <h1>一键下载所有网页视频/图片</h1>
+          <p class="subtitle">支持 1000+ 视频/图片网站 · 极速解析 · 免费无限制</p>
+
+          <form class="parser" id="parser">
+            <label class="sr-only" for="mediaUrl">媒体链接</label>
+            <div class="input-row">
+              <input id="mediaUrl" name="url" type="url" placeholder="在此处粘贴视频 / 图片 / 音频链接" autocomplete="off" required>
+              <button class="paste-button" type="button" id="pasteButton">粘贴链接</button>
+              <button class="primary-button" type="submit">提取视频图片</button>
+            </div>
+            <p class="parser-hint">直接媒体文件（如 mp4, webm, jpg, png）将直接提供下载；平台链接识别后可接入真实解析接口。</p>
+          </form>
+
+          <section class="result-panel" id="resultPanel" aria-live="polite" hidden></section>
+
+          <div class="quick-platforms" aria-label="热门平台">
+            <a href="#parser">TikTok / 抖音</a>
+            <a href="#parser">YouTube</a>
+            <a href="#parser">哔哩哔哩</a>
+            <a href="#parser">X / Twitter</a>
+            <a href="#parser">Pinterest</a>
+            <a href="#platforms">更多 1000+ 平台</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="product-section" id="desktop">
+        <div class="product-copy">
+          <p class="eyebrow">Desktop</p>
+          <h2>SnapLocal 桌面客户端</h2>
+          <p>面向批量下载的本地工作台：平台链接收集、字幕音轨提取、音视频合并、格式转换和历史任务都可以在这里继续扩展。</p>
+          <div class="button-row">
+            <a class="secondary-button" href="#parser">立即体验</a>
+            <a class="text-link" href="#faq">查看使用说明</a>
+          </div>
+        </div>
+
+        <div class="app-preview" aria-label="桌面客户端预览">
+          <div class="window-bar">
+            <span></span>
+            <span></span>
+            <span></span>
+            <strong>SnapLocal Desktop</strong>
+          </div>
+          <div class="preview-grid">
+            <div class="preview-sidebar">
+              <span class="active">全部任务</span>
+              <span>视频</span>
+              <span>图片</span>
+              <span>音频</span>
+            </div>
+            <div class="preview-main">
+              <div class="download-card complete">
+                <span class="file-icon">MP4</span>
+                <div>
+                  <strong>creator-video-1080p.mp4</strong>
+                  <small>已完成 · 48.2 MB</small>
+                </div>
+                <b>100%</b>
+              </div>
+              <div class="download-card">
+                <span class="file-icon">IMG</span>
+                <div>
+                  <strong>gallery-cover.webp</strong>
+                  <small>已识别 · 等待下载</small>
+                </div>
+                <b>72%</b>
+              </div>
+              <div class="preview-tools">
+                <span>字幕</span>
+                <span>音轨</span>
+                <span>格式转换</span>
+                <span>批量队列</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="product-section plugin-section">
+        <div class="extension-preview" aria-label="浏览器插件预览">
+          <div class="browser-top">
+            <span></span>
+            <div>snapany.com/video</div>
+          </div>
+          <div class="extension-popover">
+            <strong>检测到 3 个媒体文件</strong>
+            <p>无需复制链接，自动识别网页里的视频、直播和音频。</p>
+            <button type="button">一键保存</button>
+          </div>
+        </div>
+
+        <div class="product-copy">
+          <p class="eyebrow">Extension</p>
+          <h2>浏览器插件式体验</h2>
+          <p>保留 SnapAny 风格插件的产品表达：打开网页即可识别媒体，降低复制链接的操作成本。当前项目可继续扩展成 Chrome 插件或桌面壳。</p>
+          <div class="store-row">
+            <span>Chrome</span>
+            <span>Edge</span>
+            <span>ZIP 安装包</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="platforms-section" id="platforms">
+        <div class="section-head">
+          <p class="eyebrow">Supported Platforms</p>
+          <h2>支持的热门平台 (1000+)</h2>
+        </div>
+        <div class="platform-grid" aria-label="支持平台">
+          <a href="#parser" class="platform-card tiktok">
+            <span class="platform-icon-wrapper">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.17-2.89-.74-3.94-1.78-.22-.22-.41-.47-.59-.73v7.02c0 3.73-2.07 6.84-5.59 7.42-3.15.51-6.48-.96-7.8-3.9C3.12 14.54 4.04 10.3 7.44 8.78c.85-.38 1.8-.57 2.73-.55v4.09c-.65-.06-1.34.14-1.84.58-.92.82-.93 2.39-.02 3.21.82.74 2.18.66 2.87-.24.31-.41.44-.92.42-1.43V.02z"/></svg>
+            </span>
+            <span>TikTok / 抖音</span>
+          </a>
+          <a href="#parser" class="platform-card youtube">
+            <span class="platform-icon-wrapper">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.163a3.003 3.003 0 0 0-2.11-2.11C19.517 3.545 12 3.545 12 3.545s-7.517 0-9.388.508a3.003 3.003 0 0 0-2.11 2.11C0 8.033 0 12 0 12s0 3.967.502 5.837a3.003 3.003 0 0 0 2.11 2.11c1.871.508 9.388.508 9.388.508s7.517 0 9.388-.508a3.003 3.003 0 0 0 2.11-2.11C24 15.967 24 12 24 12s0-3.967-.502-5.837zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+            </span>
+            <span>YouTube</span>
+          </a>
+          <a href="#parser" class="platform-card bilibili">
+            <span class="platform-icon-wrapper">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17.87 2.33a.75.75 0 0 1 1.05.14l2.13 2.79a.75.75 0 1 1-1.18.91l-2.13-2.79a.75.75 0 0 1 .13-1.05zm-11.74 0a.75.75 0 0 1 .13 1.05L4.13 6.17a.75.75 0 1 1-1.18-.91l2.13-2.79a.75.75 0 0 1 1.05-.14zM20 7.5a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H4a3 3 0 0 1-3-3v-8a3 3 0 0 1 3-3h16zm-12 5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm8 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/></svg>
+            </span>
+            <span>哔哩哔哩</span>
+          </a>
+          <a href="#parser" class="platform-card twitter">
+            <span class="platform-icon-wrapper">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+            </span>
+            <span>X / Twitter</span>
+          </a>
+          <a href="#parser" class="platform-card pinterest">
+            <span class="platform-icon-wrapper">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12.017 0C5.396 0 .029 5.367.029 11.987c0 5.079 3.158 9.417 7.618 11.162-.105-.949-.199-2.403.041-3.439.219-.937 1.406-5.966 1.406-5.966s-.359-.72-.359-1.781c0-1.668.967-2.914 2.171-2.914 1.023 0 1.518.769 1.518 1.69 0 1.029-.655 2.568-.994 3.995-.283 1.194.599 2.169 1.777 2.169 2.133 0 3.772-2.249 3.772-5.495 0-2.873-2.064-4.882-5.012-4.882-3.414 0-5.418 2.561-5.418 5.207 0 1.031.397 2.138.893 2.738.098.119.112.224.083.345l-.333 1.36c-.053.22-.174.267-.402.161-1.499-.698-2.436-2.889-2.436-4.649 0-3.785 2.75-7.262 7.929-7.262 4.163 0 7.398 2.967 7.398 6.931 0 4.136-2.607 7.464-6.227 7.464-1.216 0-2.359-.631-2.75-1.378l-.748 2.853c-.271 1.043-1.002 2.35-1.492 3.146 1.124.347 2.317.535 3.554.535 6.621 0 11.985-5.367 11.985-11.988C24.005 5.367 18.638 0 12.017 0z"/></svg>
+            </span>
+            <span>Pinterest</span>
+          </a>
+          <a href="#parser" class="platform-card facebook">
+            <span class="platform-icon-wrapper">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
+            </span>
+            <span>Facebook</span>
+          </a>
+          <a href="#parser" class="platform-card instagram">
+            <span class="platform-icon-wrapper">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.051.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 1 0 0 12.324 6.162 6.162 0 0 0 0-12.324zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.406-11.845a1.44 1.44 0 1 0 0 2.881 1.44 1.44 0 0 0 0-2.881z"/></svg>
+            </span>
+            <span>Instagram</span>
+          </a>
+          <a href="#parser" class="platform-card reddit">
+            <span class="platform-icon-wrapper">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M24 11.5c0-1.65-1.35-3-3-3-.96 0-1.86.48-2.42 1.24-1.64-1-3.85-1.64-6.23-1.72l1.09-3.43 3.57.77c.05.98.87 1.74 1.86 1.74 1.02 0 1.85-.83 1.85-1.85S19.02 3.5 18 3.5c-.83 0-1.54.55-1.77 1.29l-3.98-.86c-.25-.06-.5.08-.58.32l-1.32 4.17C7.96 8.5 5.75 9.14 4.1 10.15c-.55-.73-1.43-1.15-2.35-1.15-1.65 0-3 1.35-3 3 0 1.12.63 2.12 1.56 2.62C.21 15.35.15 16.03.15 16.65c0 3.97 4.7 7.2 10.5 7.2s10.5-3.23 10.5-7.2c0-.62-.06-1.3-.16-1.53.93-.5 1.56-1.5 1.56-2.62zM7.5 15c-.83 0-1.5-.67-1.5-1.5S6.67 12 7.5 12s1.5.67 1.5 1.5S8.33 15 7.5 15zm9.46 3.92c-.83.83-2.4 1.08-3.46 1.08s-2.63-.25-3.46-1.08c-.2-.2-.2-.5 0-.7.2-.2.5-.2.7 0 .6.6 1.76.88 2.76.88s2.16-.28 2.76-.88c.2-.2.5-.2.7 0 .2.2.2.5 0 .7zm-.46-3.92c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
+            </span>
+            <span>Reddit</span>
+          </a>
+          <a href="#parser" class="platform-card vimeo">
+            <span class="platform-icon-wrapper">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M23.977 6.416c-.105 2.338-1.739 5.543-4.894 9.609-3.268 4.247-6.026 6.37-8.282 6.37-1.403 0-2.584-1.294-3.541-3.881L5.113 10.58c-.648-2.39-1.348-3.585-2.107-3.585-.152 0-.683.315-1.589.949L0 6.643c1.018-.891 2.019-1.772 3.002-2.64 1.352-1.18 2.353-1.786 3.002-1.817 1.536-.073 2.484.978 2.846 3.156.402 2.39.683 3.866.837 4.426.463 1.95.957 2.926 1.48 2.926.392 0 .991-.63 1.786-1.892.793-1.264 1.218-2.223 1.272-2.88.103-1.053-.299-1.58-1.21-1.58-.443 0-.897.102-1.363.308 1.93-6.33 6.61-6.197 7.151-.249z"/></svg>
+            </span>
+            <span>Vimeo</span>
+          </a>
+          <a href="#parser" class="platform-card vk">
+            <span class="platform-icon-wrapper">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M23.45 5.92c.16-.53 0-.92-.76-.92h-2.5c-.63 0-.93.33-1.09.7 0 0-1.27 3.1-3.07 5.1-.58.58-.84.77-1.16.77-.16 0-.39-.19-.39-.73V5.92c0-.63-.18-.92-.71-.92h-3.93c-.4 0-.64.29-.64.57 0 .6.9.74.99 2.42v3.64c0 .8-.15.94-.46.94-.84 0-2.88-3.11-4.09-6.68-.24-.69-.48-.92-1.12-.92H1.36c-.72 0-.86.33-.86.7 0 .66.85 3.92 3.94 8.25C6.5 17.06 9.5 19 12.22 19c1.64 0 1.84-.37 1.84-1v-2.25c0-.74.16-.89.69-.89.39 0 1.05.2 2.61 1.7 1.78 1.78 2.07 2.44 3.07 2.44h2.5c.72 0 1.08-.37.87-1.08-.23-.71-1.05-1.74-2.14-2.97-.58-.69-1.46-1.44-1.73-1.81-.37-.48-.26-.69 0-1.11 0 0 3.03-4.27 3.35-5.72z"/></svg>
+            </span>
+            <span>VKontakte</span>
+          </a>
+          <a href="#parser" class="platform-card okru">
+            <span class="platform-icon-wrapper">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-3.57 0-6.55 2.89-6.55 6.55s2.89 6.55 6.55 6.55 6.55-2.89 6.55-6.55S15.57 0 12 0zm0 10.1c-1.95 0-3.55-1.6-3.55-3.55S10.05 3 12 3s3.55 1.6 3.55 3.55S13.95 10.1 12 10.1zm8.33 2.98c-.46-.39-1.15-.33-1.54.14-1.02 1.23-2.58 1.95-4.29 1.95S11.23 14.45 10.2 13.22c-.39-.47-1.08-.53-1.54-.14-.47.39-.53 1.08-.14 1.54 1.45 1.74 3.65 2.76 6.08 2.76.6 0 1.18-.06 1.75-.18l2.97 2.97c.39.39 1.02.39 1.41 0s.39-1.02 0-1.41l-2.73-2.73c1.47-.85 2.67-2.09 3.47-3.59.39-.46.33-1.15-.14-1.54z"/></svg>
+            </span>
+            <span>OK.ru</span>
+          </a>
+          <a href="#parser" class="platform-card direct">
+            <span class="platform-icon-wrapper">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+            </span>
+            <span>直接媒体链接</span>
+          </a>
+        </div>
+      </section>
+
+      <section class="feature-grid" aria-label="使用步骤">
+        <article class="step-card">
+          <span class="feature-icon">1</span>
+          <h3>粘贴媒体链接</h3>
+          <p>在上方输入框粘贴支持平台的视频、图片或音频 URL，或点击“粘贴链接”按钮。</p>
+        </article>
+        <article class="step-card">
+          <span class="feature-icon">2</span>
+          <h3>极速智能解析</h3>
+          <p>点击“提取视频图片”，SnapLocal 会在几毫秒内识别并拉取所有可用的媒体格式与资源。</p>
+        </article>
+        <article class="step-card">
+          <span class="feature-icon">3</span>
+          <h3>一键保存本地</h3>
+          <p>选择您需要的视频分辨率、封面图或音轨，点击“下载”即可保存到您的设备中。</p>
+        </article>
+      </section>
+
+      <section class="history-section">
+        <div>
+          <p class="eyebrow">History</p>
+          <h2>最近解析历史</h2>
+        </div>
+        <button class="ghost-button" type="button" id="clearHistory">清空历史</button>
+        <div class="history-list" id="historyList"></div>
+      </section>
+
+      <section class="faq" id="faq">
+        <div class="section-head">
+          <p class="eyebrow">FAQ</p>
+          <h2>常见疑问</h2>
+        </div>
+        <div class="faq-accordion">
+          <details open>
+            <summary>如何使用 SnapLocal 解析下载器？</summary>
+            <div class="details-content">
+              <p>复制需要下载的视频、图片或音频链接，粘贴到顶部输入框，然后点击“提取视频图片”。系统会自动识别平台、媒体类型并展示下载项。您只需选择对应的文件点击“下载”即可。</p>
+            </div>
+          </details>
+          <details>
+            <summary>SnapLocal 是否支持直接媒体文件下载？</summary>
+            <div class="details-content">
+              <p>支持。如果您输入的是以 <code>.mp4</code>、<code>.webm</code>、<code>.mp3</code>、<code>.jpg</code>、<code>.png</code> 等结尾的直接媒体链接，系统将跳过平台识别，直接提供对应的原始文件下载通道。</p>
+            </div>
+          </details>
+          <details>
+            <summary>电脑上点击下载后，浏览器直接播放视频怎么办？</summary>
+            <div class="details-content">
+              <p>这是浏览器的默认播放行为。您可以：<br>1. 在下载按钮上点击右键，选择“链接另存为...”；<br>2. 或者在视频播放页面，点击右下角三个点选择“下载”，或者右键视频画面选择“视频另存为”。</p>
+            </div>
+          </details>
+          <details>
+            <summary>如何将此本地演示版接入真实的后端解析服务？</summary>
+            <div class="details-content">
+              <p>当前项目已完成完整的平台识别及前端 UI 闭环。如果需要获取各大平台的真实无水印视频，可在后端 <code>server.js</code> 中的 <code>/api/parse</code> 接口处，把请求的 URL 传递给您自己的合规抓取模块或第三方解析 API，并将返回的媒体地址填入 <code>items</code> 字段中即可。</p>
+            </div>
+          </details>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-brand">
+        <strong>SnapLocal</strong>
+        <p class="footer-info">本地部署的高颜值视频图片解析下载工具。</p>
+      </div>
+      <div class="footer-links">
+        <a href="#parser">在线工具</a>
+        <a href="#desktop">客户端</a>
+        <a href="#platforms">支持平台</a>
+        <a href="#faq">帮助中心</a>
+      </div>
+    </footer>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
