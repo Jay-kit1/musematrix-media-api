@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: musematrix-media-api
+    env: node
+    plan: free
+    buildCommand: python3 -m pip install --user yt-dlp
+    startCommand: node server.js
+    healthCheckPath: /
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: EXTRACTOR_TIMEOUT_MS
+        value: "45000"
+      - key: DOWNLOAD_TIMEOUT_MS
+        value: "30000"
+      - key: CORS_ORIGIN
+        value: https://jade-cuchufli-10ac4a.netlify.app
