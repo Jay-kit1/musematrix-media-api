@@ -12,7 +12,9 @@ const videoPattern = /\.(mp4|webm|mov|m4v)(\?.*)?$/i;
 const audioPattern = /\.(mp3|m4a|wav|ogg|aac)(\?.*)?$/i;
 const imagePattern = /\.(jpg|jpeg|png|webp|gif|avif)(\?.*)?$/i;
 let backendDownloadAvailable = false;
-const apiBase = String(window.MUSEMATRIX_API_BASE || "").replace(/\/+$/, "");
+const hostedApiBase = "https://musematrix-media-api.onrender.com";
+const shouldUseHostedApi = location.hostname.endsWith("netlify.app");
+const apiBase = String(window.MUSEMATRIX_API_BASE || (shouldUseHostedApi ? hostedApiBase : "")).replace(/\/+$/, "");
 
 function apiUrl(path) {
   return `${apiBase}${path}`;
@@ -170,7 +172,7 @@ async function parseWithOptionalBackend(rawValue) {
   if (!url) throw new Error("没有识别到有效链接，请粘贴包含 http 或 https 的地址。");
 
   const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), 6500);
+  const timeoutId = window.setTimeout(() => controller.abort(), 85000);
 
   try {
     const response = await fetch(apiUrl("/api/parse"), {

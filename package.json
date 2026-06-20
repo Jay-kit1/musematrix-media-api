@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "build": "python3 -m pip install --user yt-dlp",
+    "build": "python3 -m pip install yt-dlp",
     "audit": "node tools/audit.mjs && node tools/backend-audit.mjs",
     "audit:backend": "node tools/backend-audit.mjs"
   },

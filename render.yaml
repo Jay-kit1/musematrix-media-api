@@ -3,7 +3,7 @@ services:
     name: musematrix-media-api
     env: node
     plan: free
-    buildCommand: python3 -m pip install --user yt-dlp
+    buildCommand: python3 -m pip install yt-dlp
     startCommand: node server.js
     healthCheckPath: /
     envVars:
