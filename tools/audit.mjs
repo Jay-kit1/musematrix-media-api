@@ -21,7 +21,10 @@ check("Has parser form", files.html.includes('id="parser"'));
 check("Has media URL input", files.html.includes('id="mediaUrl"'));
 check("Has result panel", files.html.includes('id="resultPanel"'));
 check("Has history list", files.html.includes('id="historyList"'));
-check("Keeps API call", files.js.includes('fetch("/api/parse"'));
+check(
+  "Keeps API call",
+  files.js.includes('fetch("/api/parse"') || files.js.includes('fetch(apiUrl("/api/parse")')
+);
 check("Keeps clipboard paste", files.js.includes("navigator.clipboard.readText"));
 check("Keeps theme toggle", files.js.includes("themeToggle"));
 
