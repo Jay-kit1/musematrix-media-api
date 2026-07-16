@@ -1,0 +1,21 @@
+name: Keep Render backend warm
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Ping backend health page
+        run: |
+          curl --fail --silent --show-error --max-time 30 https://musematrix-media-api.onrender.com/ >/dev/null
+      - name: Ping parser endpoint lightly
+        run: |
+          curl --fail --silent --show-error --max-time 30 \
+            -X POST https://musematrix-media-api.onrender.com/api/parse \
+            -H 'Content-Type: application/json' \
+            --data '{"url":"https://example.com/"}' >/dev/null
