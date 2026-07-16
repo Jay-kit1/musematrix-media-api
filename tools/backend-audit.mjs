@@ -25,6 +25,9 @@ assert.deepEqual(extractBilibiliId("https://www.bilibili.com/video/BV1TnEt6MEHn"
 assert.deepEqual(extractBilibiliId("https://www.bilibili.com/video/av12345"), { aid: "12345" });
 assert.equal(extractDouyinAwemeId("https://www.douyin.com/video/7649964138193753454"), "7649964138193753454");
 assert.equal(extractDouyinAwemeId("https://v.douyin.com/UhUIZ7Ahvbs/", { id: "7649964138193753454" }), "7649964138193753454");
+assert.equal(extractDouyinAwemeId("https://v.douyin.com/UhUIZ7Ahvbs/", {
+  error: "ERROR: [Douyin] 7649964138193753454: Fresh cookies are needed"
+}), "7649964138193753454");
 
 const douyinMusic = buildDouyinMusicItem({
   aweme_detail: {
