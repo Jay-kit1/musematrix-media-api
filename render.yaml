@@ -3,7 +3,7 @@ services:
     name: musematrix-media-api
     env: node
     plan: free
-    buildCommand: python3 -m pip install yt-dlp
+    buildCommand: python3 -m pip install --upgrade yt-dlp
     startCommand: node server.js
     healthCheckPath: /
     envVars:
@@ -15,3 +15,5 @@ services:
         value: "30000"
       - key: CORS_ORIGIN
         value: https://jade-cuchufli-10ac4a.netlify.app
+      - key: YTDLP_COOKIES_TEXT
+        sync: false
