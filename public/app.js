@@ -311,15 +311,21 @@ window.downloadTrack = (url, label, ext = "") => {
   document.body.removeChild(a);
 };
 
+function isDownloadableItem(item) {
+  return item && item.url && ["视频", "音频", "图片", "video", "audio", "image"].includes(item.type);
+}
+
 function renderResult(data) {
   resultPanel.hidden = false;
   const iconSvg = platformSvgs[data.platform.name] || platformSvgs["通用网页"];
   
   // Prepare title and note
-  const displayTitle = data.title.replace(/已识别/, "已提取");
+  const isSuccessfulExtraction = data.success !== false;
+  const displayTitle = isSuccessfulExtraction ? data.title.replace(/已识别/, "已提取") : data.title;
   const displayNote = data.note || data.sourceDetail?.extractorHint || "";
   const items = Array.isArray(data.items) ? data.items : [];
   const extractorHint = data.sourceDetail?.extractorHint || "";
+  const downloadableItems = items.filter(isDownloadableItem);
 
   // Load saved tags & notes if this url is cached
   const history = getHistory();
@@ -368,7 +374,7 @@ function renderResult(data) {
       <div class="resource-block">
         <h3 class="resource-title">提取的媒体轨道 / 资源下载</h3>
         <div class="download-options">
-          ${items.length ? items.map((item) => `
+          ${downloadableItems.length ? downloadableItems.map((item) => `
             <div class="download-item">
               <div>
                 <strong>${escapeHtml(item.label)}</strong>
@@ -380,7 +386,7 @@ function renderResult(data) {
                 ${item.url ? `<button class="ghost-button copy-btn" type="button" data-action="copy" data-url="${escapeHtml(item.url)}">复制</button>` : ""}
               </div>
             </div>
-          `).join("") : `<p class="empty">没有拿到可用媒体资源。${escapeHtml(extractorHint || "这个链接可能需要 Cookie、登录态或稍后再试。")}</p>`}
+          `).join("") : `<p class="empty">没有拿到可用音频、视频或图片资源。${escapeHtml(extractorHint || displayNote || "这个链接可能需要 Cookie、登录态或稍后再试。")}</p>`}
         </div>
       </div>
 
@@ -488,6 +494,7 @@ form.addEventListener("submit", async (event) => {
       title: newEntry.title,
       note: newEntry.note,
       items: newEntry.items,
+      success: data.success,
       sourceDetail: data.sourceDetail
     });
   } catch (error) {
