@@ -18,6 +18,7 @@ const extractorTimeoutMs = Number(process.env.EXTRACTOR_TIMEOUT_MS || 45000);
 const downloadTimeoutMs = Number(process.env.DOWNLOAD_TIMEOUT_MS || 30000);
 const corsOrigin = process.env.CORS_ORIGIN || "*";
 const browserUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36";
+let runtimeCookiePath = "";
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -171,8 +172,25 @@ function getYtDlpPath() {
 }
 
 function getCookieFilePath() {
+  if (!runtimeCookiePath) {
+    const inlineCookies = process.env.YTDLP_COOKIES_TEXT || "";
+    const encodedCookies = process.env.YTDLP_COOKIES_B64 || "";
+    if (inlineCookies || encodedCookies) {
+      try {
+        const contents = inlineCookies || Buffer.from(encodedCookies, "base64").toString("utf8");
+        if (contents.trim()) {
+          runtimeCookiePath = path.join(process.env.XDG_RUNTIME_DIR || "/tmp", "musematrix-ytdlp-cookies.txt");
+          fs.writeFileSync(runtimeCookiePath, contents.endsWith("\n") ? contents : `${contents}\n`, { mode: 0o600 });
+        }
+      } catch {
+        runtimeCookiePath = "";
+      }
+    }
+  }
+
   const candidates = [
     process.env.YTDLP_COOKIES,
+    runtimeCookiePath,
     path.join(__dirname, ".cookies.txt"),
     path.join(__dirname, "cookies.txt")
   ].filter(Boolean);
@@ -443,6 +461,10 @@ function extractDouyinAwemeId(cleanUrl, extractorInfo = {}) {
   if (extractorInfo && /^\d{10,}$/.test(String(extractorInfo.id || ""))) {
     return String(extractorInfo.id);
   }
+
+  const errorText = String(extractorInfo && extractorInfo.error ? extractorInfo.error : "");
+  const errorMatch = errorText.match(/\[Douyin\]\s+(\d{10,})\b/) || errorText.match(/\baweme[_-]?id[=:]\s*(\d{10,})\b/i);
+  if (errorMatch) return errorMatch[1];
 
   const candidates = [cleanUrl, extractorInfo && extractorInfo.webpage_url].filter(Boolean);
   for (const candidate of candidates) {
@@ -994,11 +1016,15 @@ async function buildResults(rawUrl) {
 
   const rawExtractorError = platformExtractorError || (extractorInfo && extractorInfo.error ? extractorInfo.error : "");
   const friendlyExtractorError = explainExtractorError(rawExtractorError);
+  const knownMediaPlatform = platform.name !== "通用网页";
+  const failedItems = knownMediaPlatform ? [] : detailItems;
 
   return {
     url: cleanUrl,
     platform,
-    title: pageDetails.title || `${platform.name} 链接详情已识别`,
+    success: false,
+    status: friendlyExtractorError ? "extractor_blocked" : "no_media",
+    title: pageDetails.title || (knownMediaPlatform ? `${platform.name} 解析未完成` : `${platform.name} 链接详情已识别`),
     note: pageDetails.description || friendlyExtractorError || (getYtDlpPath()
       ? "已完成来源识别和网页详情读取，但当前链接没有返回可用媒体格式。"
       : "已完成来源识别和网页详情读取。若要提取多平台真实媒体，请在服务器安装 yt-dlp 或设置 YTDLP_PATH。"),
@@ -1015,7 +1041,7 @@ async function buildResults(rawUrl) {
       favicon: pageDetails.favicon || "",
       metadataError: pageDetails.error || ""
     },
-    items: detailItems
+    items: failedItems
   };
 }
 
