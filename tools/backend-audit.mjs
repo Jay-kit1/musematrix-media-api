@@ -8,6 +8,8 @@ const {
   extractBilibiliId,
   extractDouyinAwemeId,
   buildDouyinMusicItem,
+  getDouyinShareItemFromHtml,
+  buildDouyinShareResult,
   getProxyHeadersForHost,
   explainExtractorError,
   normalizeExtractorResults
@@ -43,6 +45,20 @@ const douyinMusic = buildDouyinMusicItem({
 assert.equal(douyinMusic.type, "音频");
 assert.equal(douyinMusic.ext, "mp3");
 assert.equal(douyinMusic.url, "https://sf6-cdn-tos.douyinstatic.com/obj/ies-music/demo.mp3");
+
+const douyinRouterHtml = `<script>window._ROUTER_DATA = {"loaderData":{"video_(id)/page":{"videoInfoRes":{"item_list":[{"aweme_id":"7649964138193753454","desc":"测试抖音视频","author":{"nickname":"测试作者"},"video":{"play_addr":{"uri":"video-1","url_list":["https://aweme.snssdk.com/aweme/v1/playwm/?video_id=video-1"]},"cover":{"url_list":["https://p11-sign.douyinpic.com/demo.webp"]},"height":1920,"width":1080,"duration":43000},"music":{"mid":"music-1","title":"测试原声","play_url":{"url_list":["https://sf6-cdn-tos.douyinstatic.com/obj/ies-music/demo.mp3"]}}}]}}}}}</script>`;
+const douyinShareItem = getDouyinShareItemFromHtml(douyinRouterHtml);
+assert.equal(douyinShareItem.aweme_id, "7649964138193753454");
+const douyinShareResult = buildDouyinShareResult(
+  douyinShareItem,
+  "https://v.douyin.com/UhUIZ7Ahvbs/",
+  "https://www.iesdouyin.com/share/video/7649964138193753454/",
+  { name: "抖音 / TikTok" },
+  {}
+);
+assert.equal(douyinShareResult.sourceDetail.extractor, "douyin-share-html");
+assert.equal(douyinShareResult.items.some((item) => item.type === "视频" && item.ext === "mp4"), true);
+assert.equal(douyinShareResult.items.some((item) => item.type === "音频" && item.ext === "mp3"), true);
 
 assert.equal(isPrivateIp("127.0.0.1"), true);
 assert.equal(isPrivateIp("192.168.1.8"), true);
