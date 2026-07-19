@@ -16,9 +16,12 @@ const maxRemoteJsonBytes = 1024 * 1024 * 2;
 const maxDownloadBytes = 1024 * 1024 * 250;
 const extractorTimeoutMs = Number(process.env.EXTRACTOR_TIMEOUT_MS || 45000);
 const downloadTimeoutMs = Number(process.env.DOWNLOAD_TIMEOUT_MS || 30000);
+const parseCacheTtlMs = Number(process.env.PARSE_CACHE_TTL_MS || 90000);
 const corsOrigin = process.env.CORS_ORIGIN || "*";
 const browserUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36";
 let runtimeCookiePath = "";
+const parseCache = new Map();
+const parseInFlight = new Map();
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -266,6 +269,7 @@ function requestUrl(targetUrl, options = {}) {
   const parsed = parseHttpUrl(targetUrl);
   const limit = options.limit || maxMetadataBytes;
   const timeout = options.timeout || 10000;
+  const deadlineAt = options.deadlineAt || Date.now() + timeout;
   const method = options.method || "GET";
   const redirectCount = options.redirectCount || 0;
   const headers = {
@@ -275,23 +279,50 @@ function requestUrl(targetUrl, options = {}) {
   };
 
   return new Promise((resolve, reject) => {
+    let settled = false;
+    let req;
+    const hardTimeout = Math.max(1, deadlineAt - Date.now());
+    const timer = setTimeout(() => {
+      if (req) req.destroy();
+      finishReject(new Error("请求目标网站超过总时限"));
+    }, hardTimeout);
+    timer.unref?.();
+
+    function finishResolve(value) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    }
+
+    function finishReject(error) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    }
+
     const client = parsed.protocol === "https:" ? https : http;
-    const req = client.request(parsed, {
+    req = client.request(parsed, {
       method,
-      timeout,
+      timeout: Math.min(timeout, hardTimeout),
       headers
     }, (remoteRes) => {
       const location = remoteRes.headers.location;
       if ([301, 302, 303, 307, 308].includes(remoteRes.statusCode) && location && redirectCount < 4) {
         remoteRes.resume();
         const nextUrl = new URL(location, parsed).toString();
-        requestUrl(nextUrl, { ...options, redirectCount: redirectCount + 1 }).then(resolve, reject);
+        requestUrl(nextUrl, {
+          ...options,
+          deadlineAt,
+          redirectCount: redirectCount + 1
+        }).then(finishResolve, finishReject);
         return;
       }
 
       if (method === "HEAD") {
         remoteRes.resume();
-        resolve({
+        finishResolve({
           finalUrl: parsed.toString(),
           statusCode: remoteRes.statusCode,
           headers: remoteRes.headers,
@@ -303,26 +334,34 @@ function requestUrl(targetUrl, options = {}) {
       const chunks = [];
       let received = 0;
       remoteRes.on("data", (chunk) => {
+        if (settled) return;
         received += chunk.length;
         if (received <= limit) {
           chunks.push(chunk);
         } else {
           remoteRes.destroy();
+          finishResolve({
+            finalUrl: parsed.toString(),
+            statusCode: remoteRes.statusCode,
+            headers: remoteRes.headers,
+            body: Buffer.concat(chunks).toString("utf8"),
+            truncated: true
+          });
         }
       });
       remoteRes.on("end", () => {
-        resolve({
+        finishResolve({
           finalUrl: parsed.toString(),
           statusCode: remoteRes.statusCode,
           headers: remoteRes.headers,
           body: Buffer.concat(chunks).toString("utf8")
         });
       });
-      remoteRes.on("error", reject);
+      remoteRes.on("error", finishReject);
     });
 
     req.on("timeout", () => req.destroy(new Error("请求目标网站超时")));
-    req.on("error", reject);
+    req.on("error", finishReject);
     req.end();
   });
 }
@@ -398,21 +437,18 @@ async function fetchPageDetails(cleanUrl) {
   }
 }
 
-function runYtDlp(cleanUrl) {
-  const ytdlp = getYtDlpPath();
-  if (!ytdlp) {
-    return Promise.resolve(null);
-  }
-
+function buildYtDlpArgs(cleanUrl) {
   const cookieFile = getCookieFilePath();
   const args = [
+    "--ignore-config",
     "--dump-single-json",
     "--no-playlist",
     "--no-warnings",
     "--skip-download",
-    "--retries", "2",
-    "--extractor-retries", "2",
-    "--socket-timeout", "20",
+    "--retries", "1",
+    "--extractor-retries", "1",
+    "--socket-timeout", "10",
+    "--js-runtimes", `node:${process.execPath}`,
     "--user-agent", browserUserAgent,
     cleanUrl
   ];
@@ -422,30 +458,73 @@ function runYtDlp(cleanUrl) {
   if (process.env.YTDLP_COOKIES_FROM_BROWSER) {
     args.splice(args.length - 1, 0, "--cookies-from-browser", process.env.YTDLP_COOKIES_FROM_BROWSER);
   }
+  return args;
+}
 
+function runJsonCommand(executable, args, timeoutMs) {
   return new Promise((resolve) => {
-    execFile(ytdlp, args, {
-      timeout: extractorTimeoutMs,
-      maxBuffer: 1024 * 1024 * 12
-    }, (err, stdout) => {
-      if (err || !stdout) {
-        resolve({
-          error: err ? err.message : "提取器没有返回内容",
-          extractor: "yt-dlp"
-        });
-        return;
-      }
+    let settled = false;
+    let timer;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve(value);
+    };
 
-      try {
-        resolve(JSON.parse(stdout));
-      } catch (parseErr) {
-        resolve({
-          error: parseErr.message,
-          extractor: "yt-dlp"
-        });
-      }
-    });
+    let child;
+    try {
+      child = execFile(executable, args, {
+        maxBuffer: 1024 * 1024 * 12
+      }, (err, stdout, stderr) => {
+        if (err || !stdout) {
+          const detail = String(stderr || (err && err.message) || "提取器没有返回内容").trim().slice(-4000);
+          finish({
+            error: detail || "提取器没有返回内容",
+            errorCode: "extractor_failed",
+            extractor: "yt-dlp"
+          });
+          return;
+        }
+
+        try {
+          finish(JSON.parse(stdout));
+        } catch (parseErr) {
+          finish({
+            error: parseErr.message,
+            errorCode: "invalid_extractor_json",
+            extractor: "yt-dlp"
+          });
+        }
+      });
+    } catch (err) {
+      finish({
+        error: err.message,
+        errorCode: "extractor_start_failed",
+        extractor: "yt-dlp"
+      });
+      return;
+    }
+
+    timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      finish({
+        error: `yt-dlp 超过 ${timeoutMs}ms 未完成，已强制终止`,
+        errorCode: "extractor_timeout",
+        extractor: "yt-dlp"
+      });
+    }, timeoutMs);
+    timer.unref?.();
   });
+}
+
+function runYtDlp(cleanUrl) {
+  const ytdlp = getYtDlpPath();
+  if (!ytdlp) {
+    return Promise.resolve(null);
+  }
+
+  return runJsonCommand(ytdlp, buildYtDlpArgs(cleanUrl), extractorTimeoutMs);
 }
 
 function extractBilibiliId(cleanUrl) {
@@ -562,6 +641,113 @@ function isDouyinLikeUrl(cleanUrl) {
   } catch {
     return false;
   }
+}
+
+function isTikTokLikeUrl(cleanUrl) {
+  try {
+    const host = parseHttpUrl(cleanUrl).hostname.toLowerCase();
+    return host === "tiktok.com" || host.endsWith(".tiktok.com");
+  } catch {
+    return false;
+  }
+}
+
+function buildTikwmResult(apiResponse, cleanUrl, platform, sourceDetail) {
+  const data = apiResponse && apiResponse.code === 0 ? apiResponse.data : null;
+  if (!data) return null;
+
+  const videoUrl = data.hdplay || data.play || data.wmplay || "";
+  if (!/^https?:\/\//.test(videoUrl)) return null;
+
+  const commonHeaders = {
+    "User-Agent": browserUserAgent,
+    "Referer": cleanUrl,
+    "Origin": "https://www.tiktok.com"
+  };
+  const items = [];
+  if (/^https?:\/\//.test(data.cover || "")) {
+    items.push({
+      label: "封面图片",
+      quality: "Cover",
+      type: "图片",
+      action: "open",
+      url: data.cover,
+      ext: "jpg",
+      headers: commonHeaders
+    });
+  }
+  items.push({
+    label: data.hdplay ? "TikTok HD MP4 视频" : "TikTok MP4 视频",
+    quality: data.hdplay ? "HD" : "MP4",
+    type: "视频",
+    action: "open",
+    url: videoUrl,
+    ext: "mp4",
+    size: Number(data.size || data.hd_size || 0),
+    headers: commonHeaders
+  });
+  if (/^https?:\/\//.test(data.music || "")) {
+    items.push({
+      label: `MP3 音频 ${data.music_info && data.music_info.title ? data.music_info.title : "TikTok 原声"}`,
+      quality: "Original Sound",
+      type: "音频",
+      action: "open",
+      url: data.music,
+      ext: "mp3",
+      size: Number(data.music_info && data.music_info.size ? data.music_info.size : 0),
+      headers: commonHeaders
+    });
+  }
+
+  return {
+    url: cleanUrl,
+    platform,
+    title: `${data.title || "TikTok 视频"} · 媒体已提取`,
+    note: "TikTok 主提取器受限时，已通过专用冗余通道提取视频和可用原声音频。",
+    sourceDetail: {
+      ...sourceDetail,
+      extractor: "tikwm-fallback",
+      title: data.title || "",
+      author: data.author && (data.author.nickname || data.author.unique_id) ?
+        (data.author.nickname || data.author.unique_id) : "",
+      duration: Number(data.duration || 0),
+      thumbnail: data.cover || ""
+    },
+    items
+  };
+}
+
+async function extractTikwm(cleanUrl, platform, sourceDetail) {
+  if (!isTikTokLikeUrl(cleanUrl)) return null;
+  const endpoint = `https://www.tikwm.com/api/?url=${encodeURIComponent(cleanUrl)}&hd=1`;
+  const data = await fetchJson(endpoint, {
+    "User-Agent": browserUserAgent,
+    "Accept": "application/json,text/plain,*/*",
+    "Referer": "https://www.tikwm.com/"
+  });
+  return buildTikwmResult(data, cleanUrl, platform, sourceDetail);
+}
+
+function mergeTikTokFallback(result, fallback) {
+  if (!result || !fallback || !Array.isArray(result.items) || !Array.isArray(fallback.items)) return result;
+  const fallbackMedia = fallback.items.filter((item) => item.type === "视频" || item.type === "音频");
+  const fallbackUrls = new Set(fallbackMedia.map((item) => item.url));
+  const primaryCover = result.items.find((item) => item.type === "图片");
+  const primaryMedia = result.items.filter((item) =>
+    item !== primaryCover && !fallbackUrls.has(item.url)
+  );
+  const merged = [primaryCover, ...fallbackMedia, ...primaryMedia].filter(Boolean);
+  return {
+    ...result,
+    note: merged.some((item) => item.type === "音频")
+      ? "已通过主提取器获取视频，并通过 TikTok 冗余通道补充可用原声音频。"
+      : result.note,
+    sourceDetail: {
+      ...result.sourceDetail,
+      tiktokFallback: "tikwm"
+    },
+    items: merged.slice(0, 12)
+  };
 }
 
 function buildDouyinShareResult(item, cleanUrl, finalUrl, platform, sourceDetail) {
@@ -706,7 +892,11 @@ async function extractDouyinMusic(cleanUrl, extractorInfo = {}) {
 async function addPlatformExtraItems(result, cleanUrl, platform, extractorInfo = {}) {
   if (!result || !Array.isArray(result.items)) return result;
 
-  if (platform.name === "抖音 / TikTok" && !result.items.some((item) => item.type === "音频")) {
+  if (
+    platform.name === "抖音 / TikTok" &&
+    isDouyinLikeUrl(cleanUrl) &&
+    !result.items.some((item) => item.type === "音频")
+  ) {
     const musicItem = await extractDouyinMusic(cleanUrl, extractorInfo).catch(() => null);
     if (musicItem) {
       const items = [...result.items];
@@ -847,6 +1037,7 @@ async function proxyRemoteFile(targetUrl, filename, res, redirectCount = 0) {
 
   const client = parsed.protocol === "https:" ? https : http;
   let completed = false;
+  let activeRemoteResponse = null;
   const finishWithError = (status, message) => {
     if (completed) return;
     completed = true;
@@ -862,6 +1053,7 @@ async function proxyRemoteFile(targetUrl, filename, res, redirectCount = 0) {
     timeout: downloadTimeoutMs,
     headers: requestHeaders
   }, async (remoteRes) => {
+    activeRemoteResponse = remoteRes;
     const location = remoteRes.headers.location;
     if ([301, 302, 303, 307, 308].includes(remoteRes.statusCode) && location && redirectCount < 4) {
       remoteRes.resume();
@@ -919,6 +1111,12 @@ async function proxyRemoteFile(targetUrl, filename, res, redirectCount = 0) {
   req.on("timeout", () => req.destroy(new Error("目标资源请求超时")));
   req.on("error", (err) => {
     finishWithError(502, `目标资源请求失败：${err.message}`);
+  });
+  res.once("close", () => {
+    if (completed) return;
+    completed = true;
+    req.destroy();
+    if (activeRemoteResponse) activeRemoteResponse.destroy();
   });
 }
 
@@ -1141,13 +1339,21 @@ async function buildResults(rawUrl) {
     }
   }
 
-  const extractorInfo = await runYtDlp(cleanUrl);
+  const [extractorInfo, pageDetails, tiktokFallback] = await Promise.all([
+    runYtDlp(cleanUrl),
+    fetchPageDetails(cleanUrl),
+    isTikTokLikeUrl(cleanUrl)
+      ? extractTikwm(cleanUrl, platform, sourceDetail).catch(() => null)
+      : Promise.resolve(null)
+  ]);
   const extracted = normalizeExtractorResults(extractorInfo, cleanUrl, platform, sourceDetail);
   if (extracted) {
-    return addPlatformExtraItems(extracted, cleanUrl, platform, extractorInfo || {});
+    const enriched = await addPlatformExtraItems(extracted, cleanUrl, platform, extractorInfo || {});
+    return mergeTikTokFallback(enriched, tiktokFallback);
   }
-
-  const pageDetails = await fetchPageDetails(cleanUrl);
+  if (tiktokFallback) {
+    return tiktokFallback;
+  }
   const detailItems = [
     {
       label: "原始链接",
@@ -1206,6 +1412,34 @@ async function buildResults(rawUrl) {
   };
 }
 
+async function buildResultsCached(rawUrl) {
+  const cacheKey = parseHttpUrl(rawUrl).toString();
+  const now = Date.now();
+  const cached = parseCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cached.result;
+  }
+  if (cached) parseCache.delete(cacheKey);
+
+  if (parseInFlight.has(cacheKey)) {
+    return parseInFlight.get(cacheKey);
+  }
+
+  const pending = buildResults(rawUrl)
+    .then((result) => {
+      const hasMedia = Array.isArray(result.items) && result.items.some((item) =>
+        item && typeof item.url === "string" && /^https?:\/\//.test(item.url)
+      );
+      if (hasMedia && result.success !== false) {
+        parseCache.set(cacheKey, { result, expiresAt: Date.now() + parseCacheTtlMs });
+      }
+      return result;
+    })
+    .finally(() => parseInFlight.delete(cacheKey));
+  parseInFlight.set(cacheKey, pending);
+  return pending;
+}
+
 const server = http.createServer((req, res) => {
   let parsedReqUrl;
   try {
@@ -1222,6 +1456,17 @@ const server = http.createServer((req, res) => {
       res.end();
       return;
     }
+  }
+
+  if (req.method === "GET" && parsedReqUrl.pathname === "/api/health") {
+    sendJson(res, 200, {
+      status: "ok",
+      extractor: getYtDlpPath() ? "yt-dlp" : "not-configured",
+      node: process.version,
+      uptimeSeconds: Math.round(process.uptime()),
+      revision: process.env.RENDER_GIT_COMMIT || process.env.COMMIT_REF || "local"
+    });
+    return;
   }
 
   if (req.method === "GET" && parsedReqUrl.pathname === "/api/download") {
@@ -1266,10 +1511,16 @@ const server = http.createServer((req, res) => {
           sendJson(res, 400, { error: "请先粘贴一个媒体链接。" });
           return;
         }
-        const result = await buildResults(payload.url);
+        const result = await buildResultsCached(payload.url);
         sendJson(res, 200, result);
       } catch (err) {
-        sendJson(res, 400, { error: "链接格式不正确，请粘贴完整的 http/https URL，例如 https://example.com/video.mp4" });
+        const invalidUrl = err instanceof TypeError || /URL|http|链接格式/.test(String(err && err.message));
+        sendJson(res, invalidUrl ? 400 : 502, {
+          error: invalidUrl
+            ? "链接格式不正确，请粘贴完整的 http/https URL，例如 https://example.com/video.mp4"
+            : "解析服务执行失败，请稍后重试。",
+          detail: String(err && err.message ? err.message : "unknown error").slice(0, 500)
+        });
       }
     });
     return;
@@ -1326,10 +1577,17 @@ module.exports = {
   extractBilibiliId,
   extractDouyinAwemeId,
   buildDouyinMusicItem,
+  isDouyinLikeUrl,
+  isTikTokLikeUrl,
+  buildTikwmResult,
+  mergeTikTokFallback,
   getDouyinShareItemFromHtml,
   buildDouyinShareResult,
   getProxyHeadersForHost,
   explainExtractorError,
   normalizeExtractorResults,
-  buildResults
+  buildYtDlpArgs,
+  runJsonCommand,
+  buildResults,
+  buildResultsCached
 };

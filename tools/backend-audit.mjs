@@ -8,11 +8,17 @@ const {
   extractBilibiliId,
   extractDouyinAwemeId,
   buildDouyinMusicItem,
+  isDouyinLikeUrl,
+  isTikTokLikeUrl,
+  buildTikwmResult,
+  mergeTikTokFallback,
   getDouyinShareItemFromHtml,
   buildDouyinShareResult,
   getProxyHeadersForHost,
   explainExtractorError,
-  normalizeExtractorResults
+  normalizeExtractorResults,
+  buildYtDlpArgs,
+  runJsonCommand
 } = backend;
 
 const douyinShare = "5.10 复制打开抖音，看看【Yangruikee的作品】 https://v.douyin.com/UhUIZ7Ahvbs/ BTy:/ T@y.gB";
@@ -30,6 +36,32 @@ assert.equal(extractDouyinAwemeId("https://v.douyin.com/UhUIZ7Ahvbs/", { id: "76
 assert.equal(extractDouyinAwemeId("https://v.douyin.com/UhUIZ7Ahvbs/", {
   error: "ERROR: [Douyin] 7649964138193753454: Fresh cookies are needed"
 }), "7649964138193753454");
+assert.equal(isDouyinLikeUrl("https://v.douyin.com/UhUIZ7Ahvbs/"), true);
+assert.equal(isDouyinLikeUrl("https://www.tiktok.com/@user/video/7253412088251534594"), false);
+assert.equal(isTikTokLikeUrl("https://www.tiktok.com/@user/video/7253412088251534594"), true);
+assert.equal(isTikTokLikeUrl("https://v.douyin.com/UhUIZ7Ahvbs/"), false);
+
+const tikwmFixture = buildTikwmResult({
+  code: 0,
+  data: {
+    title: "TikTok fixture",
+    hdplay: "https://v16m.tiktokcdn-us.com/demo.mp4",
+    music: "https://v16-ies-music.tiktokcdn-us.com/demo.mp3",
+    cover: "https://p16.tiktokcdn-us.com/demo.jpg",
+    author: { nickname: "Fixture Author" }
+  }
+}, "https://www.tiktok.com/@fixture/video/1", { name: "抖音 / TikTok" }, {});
+assert.equal(tikwmFixture.sourceDetail.extractor, "tikwm-fallback");
+assert.equal(tikwmFixture.items.some((item) => item.type === "视频" && item.ext === "mp4"), true);
+assert.equal(tikwmFixture.items.some((item) => item.type === "音频" && item.ext === "mp3"), true);
+const mergedTikTok = mergeTikTokFallback({
+  note: "primary",
+  sourceDetail: { extractor: "yt-dlp" },
+  items: [{ type: "视频", url: "https://cdn.example.com/primary.mp4" }]
+}, tikwmFixture);
+assert.equal(mergedTikTok.items.some((item) => item.type === "音频"), true);
+assert.equal(mergedTikTok.sourceDetail.tiktokFallback, "tikwm");
+assert.equal(mergedTikTok.items[0].label, "TikTok HD MP4 视频");
 
 const douyinMusic = buildDouyinMusicItem({
   aweme_detail: {
@@ -110,5 +142,19 @@ assert.equal(getProxyHeadersForHost("rr1---sn.googlevideo.com").Referer, "https:
 
 assert.match(explainExtractorError("Fresh cookies are needed"), /Cookie/);
 assert.match(explainExtractorError("HTTP Error 412: Precondition Failed"), /风控/);
+
+const ytdlpArgs = buildYtDlpArgs("https://www.youtube.com/watch?v=BaW_jenozKc");
+assert.equal(ytdlpArgs.includes("--ignore-config"), true);
+assert.equal(ytdlpArgs.includes("--js-runtimes"), true);
+assert.equal(ytdlpArgs.some((arg) => arg.startsWith("node:")), true);
+
+const hardTimeoutStartedAt = Date.now();
+const hardTimeoutResult = await runJsonCommand(
+  process.execPath,
+  ["-e", "setInterval(() => {}, 1000)"],
+  80
+);
+assert.equal(hardTimeoutResult.errorCode, "extractor_timeout");
+assert.equal(Date.now() - hardTimeoutStartedAt < 1000, true);
 
 console.log("Backend audit passed.");

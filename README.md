@@ -19,7 +19,7 @@ http://localhost:3000
 - 支持粘贴链接并识别常见平台来源。
 - 支持整段分享文案，会自动抽取里面的第一个 `http/https` 链接。
 - 支持 B 站公开视频的专用提取，返回视频轨、音频轨和封面。
-- 支持 YouTube、TikTok、抖音等 `yt-dlp` 支持的平台。
+- 支持 YouTube、TikTok、抖音等 `yt-dlp` 支持的平台，并启用 Node EJS 挑战解析。
 - 支持直接媒体文件链接，例如 `.mp4`、`.webm`、`.jpg`、`.png`、`.m4a`。
 - 后端解析入口集中在 `server.js` 的 `/api/parse`，资源代理入口为 `/api/download`。
 
@@ -40,7 +40,7 @@ npm run audit
 Render Web Service 可使用：
 
 ```text
-Build Command: python3 -m pip install --user yt-dlp
+Build Command: python3 -m pip install --upgrade "yt-dlp[default,curl-cffi]"
 Start Command: node server.js
 ```
 
@@ -48,9 +48,10 @@ Start Command: node server.js
 
 ```text
 HOST=0.0.0.0
-CORS_ORIGIN=https://jade-cuchufli-10ac4a.netlify.app
-EXTRACTOR_TIMEOUT_MS=45000
+CORS_ORIGIN=*
+EXTRACTOR_TIMEOUT_MS=20000
 DOWNLOAD_TIMEOUT_MS=30000
+PARSE_CACHE_TTL_MS=90000
 ```
 
 后端上线后，在前端 `app.js` 之前设置：
