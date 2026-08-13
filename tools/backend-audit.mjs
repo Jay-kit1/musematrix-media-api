@@ -5,6 +5,7 @@ const {
   parseHttpUrl,
   detectPlatform,
   isPrivateIp,
+  createPinnedLookup,
   extractBilibiliId,
   extractDouyinAwemeId,
   buildDouyinMusicItem,
@@ -104,6 +105,31 @@ assert.equal(isPrivateIp("fd00::1"), true);
 assert.equal(isPrivateIp("2001:db8::1"), true);
 assert.equal(isPrivateIp("8.8.8.8"), false);
 assert.equal(isPrivateIp("2606:4700:4700::1111"), false);
+
+const pinnedLookup = createPinnedLookup({ address: "8.8.8.8", family: 4 });
+await new Promise((resolve, reject) => {
+  pinnedLookup("example.com", { all: true }, (error, records) => {
+    try {
+      assert.ifError(error);
+      assert.deepEqual(records, [{ address: "8.8.8.8", family: 4 }]);
+      resolve();
+    } catch (auditError) {
+      reject(auditError);
+    }
+  });
+});
+await new Promise((resolve, reject) => {
+  pinnedLookup("example.com", {}, (error, address, family) => {
+    try {
+      assert.ifError(error);
+      assert.equal(address, "8.8.8.8");
+      assert.equal(family, 4);
+      resolve();
+    } catch (auditError) {
+      reject(auditError);
+    }
+  });
+});
 await assert.rejects(
   buildResults("http://127.0.0.1/private"),
   /本机、内网或保留地址/

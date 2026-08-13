@@ -160,6 +160,18 @@ async function assertPublicUrl(parsed) {
   return records[0];
 }
 
+function createPinnedLookup(resolved) {
+  const pinned = {
+    address: resolved.address,
+    family: resolved.family
+  };
+
+  return (_hostname, options, callback) => {
+    const wantsAll = Boolean(options && typeof options === "object" && options.all);
+    callback(null, wantsAll ? [pinned] : pinned.address, wantsAll ? undefined : pinned.family);
+  };
+}
+
 function isSameOrSubdomain(host, domain) {
   return host === domain || host.endsWith(`.${domain}`);
 }
@@ -339,7 +351,7 @@ async function requestUrl(targetUrl, options = {}) {
       method,
       timeout: Math.min(timeout, hardTimeout),
       headers,
-      lookup: (_hostname, _options, callback) => callback(null, resolved.address, resolved.family)
+      lookup: createPinnedLookup(resolved)
     }, (remoteRes) => {
       const location = remoteRes.headers.location;
       if ([301, 302, 303, 307, 308].includes(remoteRes.statusCode) && location && redirectCount < 4) {
@@ -1085,7 +1097,7 @@ async function proxyRemoteFile(targetUrl, filename, res, redirectCount = 0) {
   const req = client.get(parsed, {
     timeout: downloadTimeoutMs,
     headers: requestHeaders,
-    lookup: (_hostname, _options, callback) => callback(null, resolved.address, resolved.family)
+    lookup: createPinnedLookup(resolved)
   }, async (remoteRes) => {
     activeRemoteResponse = remoteRes;
     const location = remoteRes.headers.location;
@@ -1626,6 +1638,7 @@ module.exports = {
   detectPlatform,
   getMediaKind,
   isPrivateIp,
+  createPinnedLookup,
   extractBilibiliId,
   extractDouyinAwemeId,
   buildDouyinMusicItem,
