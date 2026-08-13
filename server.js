@@ -18,6 +18,7 @@ const extractorTimeoutMs = Number(process.env.EXTRACTOR_TIMEOUT_MS || 45000);
 const downloadTimeoutMs = Number(process.env.DOWNLOAD_TIMEOUT_MS || 30000);
 const parseCacheTtlMs = Number(process.env.PARSE_CACHE_TTL_MS || 90000);
 const corsOrigin = process.env.CORS_ORIGIN || "*";
+const exposeErrorDetails = process.env.EXPOSE_ERROR_DETAILS === "true";
 const browserUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36";
 let runtimeCookiePath = "";
 const parseCache = new Map();
@@ -50,6 +51,16 @@ function sendText(res, status, message) {
     "Cache-Control": "no-store"
   });
   res.end(message);
+}
+
+function applySecurityHeaders(res) {
+  res.setHeader("Content-Security-Policy", "default-src 'self'; connect-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'");
+  res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+  res.setHeader("Cross-Origin-Resource-Policy", "same-site");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
 }
 
 function applyCors(req, res) {
@@ -100,13 +111,32 @@ function isPrivateIp(address) {
       (parts[0] === 169 && parts[1] === 254) ||
       (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
       (parts[0] === 192 && parts[1] === 168) ||
-      parts[0] === 0
+      (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) ||
+      (parts[0] === 192 && parts[1] === 0) ||
+      (parts[0] === 192 && parts[1] === 88 && parts[2] === 99) ||
+      (parts[0] === 192 && parts[1] === 0 && parts[2] === 2) ||
+      (parts[0] === 198 && (parts[1] === 18 || parts[1] === 19)) ||
+      (parts[0] === 198 && parts[1] === 51 && parts[2] === 100) ||
+      (parts[0] === 203 && parts[1] === 0 && parts[2] === 113) ||
+      parts[0] === 0 ||
+      parts[0] >= 224
     );
   }
 
   if (net.isIP(address) === 6) {
-    const normalized = address.toLowerCase();
-    return normalized === "::1" || normalized.startsWith("fc") || normalized.startsWith("fd") || normalized.startsWith("fe80:");
+    const normalized = address.toLowerCase().split("%")[0];
+    const firstHextet = Number.parseInt(normalized.split(":")[0] || "0", 16);
+    return (
+      normalized === "::" ||
+      normalized === "::1" ||
+      normalized.startsWith("::ffff:") ||
+      normalized.startsWith("64:ff9b:") ||
+      normalized.startsWith("2001:db8:") ||
+      (firstHextet & 0xfe00) === 0xfc00 ||
+      (firstHextet & 0xffc0) === 0xfe80 ||
+      (firstHextet & 0xffc0) === 0xfec0 ||
+      (firstHextet & 0xff00) === 0xff00
+    );
   }
 
   return true;
@@ -115,18 +145,19 @@ function isPrivateIp(address) {
 async function assertPublicUrl(parsed) {
   const hostname = parsed.hostname.toLowerCase();
   if (hostname === "localhost" || hostname.endsWith(".localhost")) {
-    throw new Error("不允许代理本机地址");
+    throw new Error("不允许代理本机、内网或保留地址");
   }
 
   if (net.isIP(hostname)) {
-    if (isPrivateIp(hostname)) throw new Error("不允许代理内网地址");
-    return;
+    if (isPrivateIp(hostname)) throw new Error("不允许代理本机、内网或保留地址");
+    return { address: hostname, family: net.isIP(hostname) };
   }
 
   const records = await dns.lookup(hostname, { all: true });
   if (!records.length || records.some((record) => isPrivateIp(record.address))) {
-    throw new Error("不允许代理内网地址");
+    throw new Error("不允许代理本机、内网或保留地址");
   }
+  return records[0];
 }
 
 function isSameOrSubdomain(host, domain) {
@@ -265,8 +296,9 @@ function explainExtractorError(errorText) {
   return "提取器没有拿到可用媒体，可能是平台风控、私密内容或链接已失效。";
 }
 
-function requestUrl(targetUrl, options = {}) {
+async function requestUrl(targetUrl, options = {}) {
   const parsed = parseHttpUrl(targetUrl);
+  const resolved = await assertPublicUrl(parsed);
   const limit = options.limit || maxMetadataBytes;
   const timeout = options.timeout || 10000;
   const deadlineAt = options.deadlineAt || Date.now() + timeout;
@@ -306,7 +338,8 @@ function requestUrl(targetUrl, options = {}) {
     req = client.request(parsed, {
       method,
       timeout: Math.min(timeout, hardTimeout),
-      headers
+      headers,
+      lookup: (_hostname, _options, callback) => callback(null, resolved.address, resolved.family)
     }, (remoteRes) => {
       const location = remoteRes.headers.location;
       if ([301, 302, 303, 307, 308].includes(remoteRes.statusCode) && location && redirectCount < 4) {
@@ -1033,7 +1066,7 @@ async function extractBilibili(cleanUrl, platform, sourceDetail) {
 
 async function proxyRemoteFile(targetUrl, filename, res, redirectCount = 0) {
   const parsed = parseHttpUrl(targetUrl);
-  await assertPublicUrl(parsed);
+  const resolved = await assertPublicUrl(parsed);
 
   const client = parsed.protocol === "https:" ? https : http;
   let completed = false;
@@ -1051,7 +1084,8 @@ async function proxyRemoteFile(targetUrl, filename, res, redirectCount = 0) {
 
   const req = client.get(parsed, {
     timeout: downloadTimeoutMs,
-    headers: requestHeaders
+    headers: requestHeaders,
+    lookup: (_hostname, _options, callback) => callback(null, resolved.address, resolved.family)
   }, async (remoteRes) => {
     activeRemoteResponse = remoteRes;
     const location = remoteRes.headers.location;
@@ -1082,6 +1116,11 @@ async function proxyRemoteFile(targetUrl, filename, res, redirectCount = 0) {
       .replace(/[^\w.\-\u4e00-\u9fa5]+/g, "_")
       .slice(0, 120) || "resource";
     const contentType = remoteRes.headers["content-type"] || "application/octet-stream";
+    if (!/^(video|audio|image)\//i.test(contentType) && !/^application\/(octet-stream|mp4|vnd\.apple\.mpegurl|x-mpegurl)/i.test(contentType)) {
+      remoteRes.resume();
+      finishWithError(415, "目标地址不是可保存的媒体资源。");
+      return;
+    }
     let streamed = 0;
 
     res.writeHead(200, {
@@ -1278,6 +1317,9 @@ function detectPlatform(rawUrl) {
 
 async function buildResults(rawUrl) {
   const parsed = parseHttpUrl(rawUrl);
+  // Validate before invoking yt-dlp or any platform fallback so subprocesses
+  // cannot become an SSRF bypass around the HTTP helper's DNS checks.
+  await assertPublicUrl(parsed);
   const platform = detectPlatform(rawUrl);
   const ext = platform.extension || getExtension(parsed.pathname);
   const directKind = platform.kind || getMediaKind(ext);
@@ -1441,6 +1483,7 @@ async function buildResultsCached(rawUrl) {
 }
 
 const server = http.createServer((req, res) => {
+  applySecurityHeaders(res);
   let parsedReqUrl;
   try {
     parsedReqUrl = new URL(req.url || "/", `http://${host}:${port}`);
@@ -1487,6 +1530,12 @@ const server = http.createServer((req, res) => {
 
   if (req.method === "POST" && parsedReqUrl.pathname === "/api/parse") {
 
+    const contentType = String(req.headers["content-type"] || "").toLowerCase();
+    if (!contentType.startsWith("application/json")) {
+      sendJson(res, 415, { error: "请求必须使用 application/json。" });
+      return;
+    }
+
     let body = "";
     let bodyTooLarge = false;
     req.on("data", (chunk) => {
@@ -1514,12 +1563,15 @@ const server = http.createServer((req, res) => {
         const result = await buildResultsCached(payload.url);
         sendJson(res, 200, result);
       } catch (err) {
-        const invalidUrl = err instanceof TypeError || /URL|http|链接格式/.test(String(err && err.message));
+        const policyBlocked = /本机、内网或保留地址/.test(String(err && err.message));
+        const invalidUrl = err instanceof TypeError || /URL|http|链接格式/.test(String(err && err.message)) || policyBlocked;
         sendJson(res, invalidUrl ? 400 : 502, {
-          error: invalidUrl
+          error: policyBlocked
+            ? "该链接指向本机、内网或保留地址，服务不会访问。"
+            : invalidUrl
             ? "链接格式不正确，请粘贴完整的 http/https URL，例如 https://example.com/video.mp4"
             : "解析服务执行失败，请稍后重试。",
-          detail: String(err && err.message ? err.message : "unknown error").slice(0, 500)
+          ...(exposeErrorDetails ? { detail: String(err && err.message ? err.message : "unknown error").slice(0, 500) } : {})
         });
       }
     });

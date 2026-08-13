@@ -4,15 +4,18 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>MuseMatrix - 灵感矩阵空间</title>
-    <meta name="description" content="智能提取多维媒体，连接您的创意线索：一键捕获公开视频、图片及网页资产，生成具有笔记和标签的数码灵感卡片。">
+    <meta name="description" content="整理散落的创意线索：识别公开视频、图片及网页资产，生成带笔记和标签的个人灵感卡片。">
     <meta name="theme-color" content="#f5f8fc">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="MuseMatrix">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Cpath d='M18 43V21h7l7 10 7-10h7v22h-7V32l-7 10-7-10v11z' fill='white'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="./styles.css">
   </head>
   <body>
+    <a class="skip-link" href="#parser">跳到链接输入</a>
     <!-- Interactive Background Particles -->
     <canvas id="matrixParticles"></canvas>
+    <div class="cursor-glow" id="cursorGlow" aria-hidden="true"></div>
 
     <!-- Spiral Top Tech Connector Decoration -->
     <div class="notebook-spine" aria-hidden="true">
@@ -40,17 +43,15 @@
         <span>MuseMatrix</span>
       </a>
 
-      <nav class="platform-nav" aria-label="矩阵分类">
-        <a href="#parser">视频提取</a>
-        <a href="#parser">交互排版</a>
-        <a href="#parser">视听记录</a>
-        <a href="#parser">文字灵感</a>
-        <a href="#platforms">矩阵来源</a>
-        <a href="#labs">创意实验室</a>
+      <nav class="platform-nav" aria-label="主导航">
+        <a href="#parser">整理链接</a>
+        <a href="#boardPreview">灵感板</a>
+        <a href="#platforms">可识别来源</a>
+        <a href="#labs">导出</a>
       </nav>
 
       <div class="header-actions">
-        <span class="studio-status">MATRIX ONLINE</span>
+        <span class="studio-status" id="apiStatus">API CHECKING</span>
         <button class="ghost-button" type="button" id="themeToggle">深色</button>
       </div>
     </header>
@@ -58,33 +59,45 @@
     <main id="top">
       <section class="hero">
         <div class="hero-inner">
-          <div class="studio-tagline">
+          <div class="studio-tagline reveal-on-scroll">
             <span class="notice-badge">MUSE COGNITION v1.2</span>
             <span class="notice-text">把散落的链接转化为多维灵感矩阵</span>
           </div>
 
-          <h1>智能连接散落的创意灵感</h1>
-          <p class="subtitle">输入公开视频、图片或网页链接，先生成可保存的灵感卡片；有后端时自动提取媒体，静态上线时也能独立打开。</p>
+          <h1 class="reveal-on-scroll">把素材链接整理成可复用的灵感卡片</h1>
+          <p class="subtitle reveal-on-scroll">粘贴公开视频、图片或网页链接，MuseMatrix 会识别来源、提取可用媒体、保存笔记和标签；后端不可用时自动降级为静态灵感卡片。</p>
 
-          <form class="parser" id="parser">
+          <div class="signal-rail reveal-on-scroll" aria-label="服务状态">
+            <span><strong id="healthRevision">--</strong>后端版本</span>
+            <span><strong id="healthExtractor">--</strong>提取器</span>
+            <span><strong>Local</strong>本地历史</span>
+          </div>
+
+          <form class="parser reveal-on-scroll" id="parser">
             <div class="cyber-corner top-left"></div>
             <div class="cyber-corner top-right"></div>
             <div class="cyber-corner bottom-left"></div>
             <div class="cyber-corner bottom-right"></div>
+            <div class="parser-modebar" aria-label="处理流程">
+              <span class="mode-pill active">链接识别</span>
+              <span class="mode-pill">媒体提取</span>
+              <span class="mode-pill">本地保存</span>
+            </div>
             
             <label class="sr-only" for="mediaUrl">灵感节点 URL</label>
             <div class="input-row">
-              <input id="mediaUrl" name="url" type="text" placeholder="粘贴视频 / 图片 / 网页链接或分享文案接入矩阵" autocomplete="off" required>
+              <span class="input-prefix" aria-hidden="true">URL</span>
+              <input id="mediaUrl" name="url" type="text" placeholder="粘贴视频、图片、网页链接或分享文案" autocomplete="off" required>
               <button class="paste-button" type="button" id="pasteButton">粘贴链接</button>
               <button class="primary-button" type="submit">生成素材卡片</button>
             </div>
-            <p class="parser-hint">直接媒体链接（如 mp4, webm, mp3, jpg, png）可直接保存；平台分享链接会先生成灵感卡片，真实音视频提取可在接入后端后自动启用。</p>
+            <p class="parser-hint">直接媒体链接可立即打开或保存；平台分享链接会优先请求后端真实提取，失败时保留可编辑的灵感卡片和原链接。</p>
           </form>
 
           <!-- Result Panel for Card Rendering -->
           <section class="result-panel" id="resultPanel" aria-live="polite" hidden></section>
 
-          <div class="quick-platforms" aria-label="支持的资产类型">
+          <div class="quick-platforms reveal-on-scroll" aria-label="支持的资产类型">
             <span>智能来源识别：</span>
             <a href="#parser">抖音 / TikTok</a>
             <a href="#parser">哔哩哔哩</a>
@@ -97,14 +110,14 @@
       </section>
 
       <!-- Mock Inspiration Board Preview (Replaces Desktop section) -->
-      <section class="product-section" id="boardPreview">
+      <section class="product-section reveal-on-scroll" id="boardPreview">
         <div class="product-copy">
           <p class="eyebrow">[ GRID VISUALIZER ]</p>
           <h2>灵感智能看板</h2>
-          <p>把平时散落的创意线索整理进看板。在这里，你粘贴的每个素材链接都会生成一张别致的卡片，支持撰写灵感笔记、打上分类标签，随时点击下载或复制原链接。</p>
+          <p>把平时散落的创意线索整理进看板。每个链接都会生成一张可回看的素材卡片，支持撰写笔记、打上分类标签，并按资源类型打开、保存或复制。</p>
           <div class="button-row">
             <a class="secondary-button" href="#parser">开始构建</a>
-            <a class="text-link" href="#faq">本地数据存储 ↗</a>
+            <a class="text-link" href="#faq">查看数据说明</a>
           </div>
         </div>
 
@@ -149,13 +162,12 @@
       </section>
 
       <!-- Workflow Section (Replaces Plugin section) -->
-      <section class="product-section plugin-section" id="workflowSection">
+      <section class="product-section plugin-section reveal-on-scroll" id="workflowSection">
         <div class="extension-preview" aria-label="流程规范说明">
           <div class="notebook-page-mock">
             <div class="cyber-corner top-left"></div>
             <div class="cyber-corner top-right"></div>
             <div class="notebook-header">
-              <span class="clip-art">⚡</span>
               <strong>MUSE_WORKFLOW_LOG.conf</strong>
             </div>
             <ol class="notebook-steps">
@@ -169,7 +181,7 @@
               </li>
               <li>
                 <strong>3. 认知记忆 (MEMORIZE)</strong>
-                <span>输入您的笔记与分类标签，数据将即时在本地写入。</span>
+                <span>输入笔记与分类标签，数据将即时在本地写入。</span>
               </li>
             </ol>
           </div>
@@ -178,7 +190,7 @@
         <div class="product-copy">
           <p class="eyebrow">[ PIPELINE LOGIC ]</p>
           <h2>三步构建你的认知灵感矩阵</h2>
-          <p>无需繁琐的本地文件整理与混乱的目录管理。通过将链接卡片化，MuseMatrix 帮你专注于记录“这个素材为什么吸引我”以及“我可以怎么使用它”。发布为静态站点后，页面本身不依赖框架和外部库。</p>
+          <p>无需繁琐的本地文件整理与混乱的目录管理。通过将链接卡片化，MuseMatrix 帮你专注记录“这个素材为什么吸引我”以及“我可以怎么使用它”。页面本身不依赖前端框架，加载更轻，部署也更稳。</p>
           <div class="store-row">
             <span>1. 链接接入</span>
             <span>2. 矩阵提取</span>
@@ -188,10 +200,10 @@
       </section>
 
       <!-- Rebranded platforms -->
-      <section class="platforms-section" id="platforms">
+      <section class="platforms-section reveal-on-scroll" id="platforms">
         <div class="section-head">
           <p class="eyebrow">[ SOURCE TERMINALS ]</p>
-          <h2>支持智能提取的平台 terminals</h2>
+          <h2>可识别来源</h2>
         </div>
         <div class="platform-grid" aria-label="支持识别来源">
           <a href="#parser" class="platform-card tiktok">
@@ -204,7 +216,7 @@
             <span class="platform-icon-wrapper">
               <svg viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.163a3.003 3.003 0 0 0-2.11-2.11C19.517 3.545 12 3.545 12 3.545s-7.517 0-9.388.508a3.003 3.003 0 0 0-2.11 2.11C0 8.033 0 12 0 12s0 3.967.502 5.837a3.003 3.003 0 0 0 2.11 2.11c1.871.508 9.388.508 9.388.508s7.517 0 9.388-.508a3.003 3.003 0 0 0 2.11-2.11C24 15.967 24 12 24 12s0-3.967-.502-5.837zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
             </span>
-            <span>YouTube Terminal</span>
+            <span>YouTube</span>
           </a>
           <a href="#parser" class="platform-card bilibili">
             <span class="platform-icon-wrapper">
@@ -252,7 +264,7 @@
       </section>
 
       <!-- Rebranded features grid -->
-      <section class="feature-grid" aria-label="灵感整理细节">
+      <section class="feature-grid reveal-on-scroll" aria-label="灵感整理细节">
         <article class="step-card">
           <div class="cyber-corner top-left"></div>
           <div class="cyber-corner top-right"></div>
@@ -264,8 +276,8 @@
           <div class="cyber-corner top-left"></div>
           <div class="cyber-corner top-right"></div>
           <span class="feature-icon">02</span>
-          <h3>多维轨道下载</h3>
-          <p>直接媒体链接可保存或打开；平台链接上线后先保留原链，接入后端后可展示 MP4、MP3、封面等轨道。</p>
+          <h3>媒体轨道整理</h3>
+          <p>直接媒体链接可保存或打开；平台链接会在后端可用时展示 MP4、MP3、封面等轨道，并保留原始来源。</p>
         </article>
         <article class="step-card">
           <div class="cyber-corner top-left"></div>
@@ -277,7 +289,7 @@
       </section>
 
       <!-- Rebranded History Section -->
-      <section class="history-section">
+      <section class="history-section reveal-on-scroll">
         <div>
           <p class="eyebrow">[ STORAGE REGISTRY ]</p>
           <h2>我的灵感矩阵看板</h2>
@@ -287,7 +299,7 @@
       </section>
 
       <!-- Cognitive Labs Section -->
-      <section class="platforms-section" id="labs">
+      <section class="platforms-section reveal-on-scroll" id="labs">
         <div class="section-head">
           <p class="eyebrow">[ COGNITIVE LABS ]</p>
           <h2>多维创意实验室</h2>
@@ -300,13 +312,13 @@
           
           <div class="labs-grid">
             <div class="lab-card">
-              <h3>📋 导出引证矩阵</h3>
+              <h3>导出引证矩阵</h3>
               <p>将当前保存在本地浏览器中的所有灵感节点及想法一键编译为 Markdown 格式的日志表，方便导入到 Notion、Obsidian 等软件中进行知识库管理。</p>
               <button class="primary-button lab-action-btn" type="button" id="exportMarkdown">一键导出 Markdown</button>
             </div>
             <div class="lab-card">
-              <h3>🔬 矩阵统计分析</h3>
-              <p>实时分析您记录的标签分布和平台占比，提供数字创作者视听素材的使用分布概览。</p>
+              <h3>矩阵统计分析</h3>
+              <p>实时分析已记录的标签分布和平台占比，提供视听素材的使用分布概览。</p>
               <div class="mock-stats" id="statsPreview">
                 <span class="stat-badge">标签共计: <b id="statTags">0</b> 个</span>
                 <span class="stat-badge">收集节点: <b id="statCards">0</b> 个</span>
@@ -328,7 +340,7 @@
       </section>
 
       <!-- Rebranded FAQ Section -->
-      <section class="faq" id="faq">
+      <section class="faq reveal-on-scroll" id="faq">
         <div class="section-head">
           <p class="eyebrow">[ SYSTEM CORE FAQ ]</p>
           <h2>矩阵说明文档</h2>
@@ -343,17 +355,17 @@
           <details>
             <summary>本地数据持久化机制是怎样的？</summary>
             <div class="details-content">
-              <p>非常安全。你记录的每一条灵感想法、分类标签以及卡片历史，都存储在您当前浏览器的本地存储（LocalStorage）中。数据完全属于你，不会上传到任何云端服务器，保证了个人创意库的隐私 and 即时响应性。</p>
+              <p>你记录的每一条灵感想法、分类标签以及卡片历史，都存储在当前浏览器的本地存储（LocalStorage）中。数据不会因为记录笔记而上传到云端，但更换浏览器或清空浏览器数据会丢失本地记录。</p>
             </div>
           </details>
           <details>
-            <summary>“下载”与“矩阵提取”的作用与意义？</summary>
+            <summary>媒体保存与链接识别有什么区别？</summary>
             <div class="details-content">
               <p>直接媒体链接可直接打开或保存。抖音、B站、YouTube 等平台的真实视频/音频地址通常需要后端解析服务处理跨域、跳转和登录态；本静态站会优雅降级，不会影响页面上线访问。</p>
             </div>
           </details>
           <details>
-            <summary>如何扩充该矩阵终端以映射真实的视频图文地址？</summary>
+            <summary>如何接入真实的视频与图文地址？</summary>
             <div class="details-content">
               <p>当前项目已完成完整的平台识别和静态上线闭环。如果需要获取真实视频或图片，可提供 <code>/api/parse</code> 接口，并将媒体地址填入 <code>items</code> 字段。前端会自动优先调用后端，失败时回到静态识别模式。</p>
             </div>
@@ -365,12 +377,12 @@
     <footer class="site-footer">
       <div class="footer-brand">
         <strong>MuseMatrix</strong>
-        <p class="footer-info">连接散落的数字线索，构建您个人的全息灵感矩阵空间。</p>
+        <p class="footer-info">连接散落的数字线索，构建个人灵感工作台。</p>
       </div>
       <div class="footer-links">
         <a href="#parser">矩阵提取</a>
         <a href="#boardPreview">矩阵画布</a>
-        <a href="#platforms">来源终端</a>
+        <a href="#platforms">可识别来源</a>
         <a href="#faq">关于空间</a>
       </div>
     </footer>

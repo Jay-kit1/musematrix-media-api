@@ -18,7 +18,8 @@ const {
   explainExtractorError,
   normalizeExtractorResults,
   buildYtDlpArgs,
-  runJsonCommand
+  runJsonCommand,
+  buildResults
 } = backend;
 
 const douyinShare = "5.10 复制打开抖音，看看【Yangruikee的作品】 https://v.douyin.com/UhUIZ7Ahvbs/ BTy:/ T@y.gB";
@@ -94,7 +95,19 @@ assert.equal(douyinShareResult.items.some((item) => item.type === "音频" && it
 
 assert.equal(isPrivateIp("127.0.0.1"), true);
 assert.equal(isPrivateIp("192.168.1.8"), true);
+assert.equal(isPrivateIp("100.64.0.1"), true);
+assert.equal(isPrivateIp("198.18.0.1"), true);
+assert.equal(isPrivateIp("::1"), true);
+assert.equal(isPrivateIp("::ffff:127.0.0.1"), true);
+assert.equal(isPrivateIp("fe80::1"), true);
+assert.equal(isPrivateIp("fd00::1"), true);
+assert.equal(isPrivateIp("2001:db8::1"), true);
 assert.equal(isPrivateIp("8.8.8.8"), false);
+assert.equal(isPrivateIp("2606:4700:4700::1111"), false);
+await assert.rejects(
+  buildResults("http://127.0.0.1/private"),
+  /本机、内网或保留地址/
+);
 
 const normalized = normalizeExtractorResults({
   title: "fixture",

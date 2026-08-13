@@ -5,6 +5,13 @@ const pasteButton = document.querySelector("#pasteButton");
 const clearHistoryButton = document.querySelector("#clearHistory");
 const historyList = document.querySelector("#historyList");
 const themeToggle = document.querySelector("#themeToggle");
+const apiStatus = document.querySelector("#apiStatus");
+const healthRevision = document.querySelector("#healthRevision");
+const healthExtractor = document.querySelector("#healthExtractor");
+const submitButton = form.querySelector('button[type="submit"]');
+const modePills = [...document.querySelectorAll(".mode-pill")];
+const cursorGlow = document.querySelector("#cursorGlow");
+const reduceMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
 
 const historyKey = "muse-matrix-history";
 const directMediaPattern = /\.(mp4|webm|mov|m4v|mp3|m4a|wav|ogg|aac|jpg|jpeg|png|webp|gif|avif)(\?.*)?$/i;
@@ -12,12 +19,46 @@ const videoPattern = /\.(mp4|webm|mov|m4v)(\?.*)?$/i;
 const audioPattern = /\.(mp3|m4a|wav|ogg|aac)(\?.*)?$/i;
 const imagePattern = /\.(jpg|jpeg|png|webp|gif|avif)(\?.*)?$/i;
 let backendDownloadAvailable = false;
-const hostedApiBase = "https://musematrix-media-api.onrender.com";
-const shouldUseHostedApi = location.hostname.endsWith("netlify.app");
-const apiBase = String(window.MUSEMATRIX_API_BASE || (shouldUseHostedApi ? hostedApiBase : "")).replace(/\/+$/, "");
+const apiBase = String(window.MUSEMATRIX_API_BASE || "").replace(/\/+$/, "");
 
 function apiUrl(path) {
   return `${apiBase}${path}`;
+}
+
+function compactRevision(value) {
+  const revision = String(value || "local");
+  return revision === "local" ? revision : revision.slice(0, 7);
+}
+
+function setApiStatus(state, label) {
+  if (!apiStatus) return;
+  apiStatus.dataset.state = state;
+  apiStatus.textContent = label;
+}
+
+async function checkApiHealth() {
+  setApiStatus("checking", "API CHECKING");
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch(apiUrl("/api/health"), {
+      headers: { "Accept": "application/json" },
+      signal: controller.signal
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    backendDownloadAvailable = data.status === "ok";
+    setApiStatus("online", "API ONLINE");
+    if (healthRevision) healthRevision.textContent = compactRevision(data.revision);
+    if (healthExtractor) healthExtractor.textContent = data.extractor || "ready";
+  } catch {
+    backendDownloadAvailable = false;
+    setApiStatus("offline", "STATIC MODE");
+    if (healthRevision) healthRevision.textContent = "offline";
+    if (healthExtractor) healthExtractor.textContent = "fallback";
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 // Custom premium SVGs for results
@@ -249,7 +290,7 @@ function renderHistory() {
     const iconSvg = platformSvgs[item.platform] || platformSvgs["通用网页"];
     
     return `
-      <div class="history-card" data-url="${escapeHtml(item.url)}">
+      <div class="history-card spotlight-card" data-url="${escapeHtml(item.url)}">
         <div class="cyber-corner top-left"></div>
         <div class="cyber-corner top-right"></div>
         
@@ -265,15 +306,14 @@ function renderHistory() {
         ${tagsHtml}
         <div class="history-card-actions">
           <button class="ghost-button view-card-btn" type="button">观察节点</button>
-          <button class="ghost-button copy-link-btn" type="button" onclick="event.stopPropagation(); copyToClipboard('${escapeHtml(item.url)}', this)">复制原链</button>
+          <button class="ghost-button copy-link-btn" type="button" data-action="copy-history" data-url="${escapeHtml(item.url)}">复制原链</button>
         </div>
       </div>
     `;
   }).join("");
 }
 
-// Copy helper function (exposed to window for onclick handlers)
-window.copyToClipboard = async (text, button) => {
+async function copyToClipboard(text, button) {
   try {
     await navigator.clipboard.writeText(text);
     const originalText = button.textContent;
@@ -286,9 +326,9 @@ window.copyToClipboard = async (text, button) => {
   } catch {
     alert("复制失败，请手动选择复制。");
   }
-};
+}
 
-window.downloadTrack = (url, label, ext = "") => {
+function downloadTrack(url, label, ext = "") {
   const a = document.createElement("a");
   const parsedExt = (() => {
     try {
@@ -309,7 +349,7 @@ window.downloadTrack = (url, label, ext = "") => {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-};
+}
 
 function isDownloadableItem(item) {
   return item && item.url && ["视频", "音频", "图片", "video", "audio", "image"].includes(item.type);
@@ -340,9 +380,9 @@ function renderResult(data) {
       <h4 class="palette-title">🎨 全息色彩矩阵分析 (PALETTE MATRIX)</h4>
       <div class="palette-grid-row">
         ${palette.map(color => `
-          <div class="palette-chip" style="background-color: ${color};" onclick="copyToClipboard('${color}', this)" title="点击复制 Hex 代码">
+          <button class="palette-chip" type="button" style="background-color: ${color};" data-action="copy-color" data-value="${color}" title="复制 ${color}">
             <span class="color-hex">${color}</span>
-          </div>
+          </button>
         `).join("")}
       </div>
     </div>
@@ -372,7 +412,10 @@ function renderResult(data) {
       ${extractorHint && extractorHint !== displayNote ? `<p class="result-note warning">${escapeHtml(extractorHint)}</p>` : ""}
       
       <div class="resource-block">
-        <h3 class="resource-title">提取的媒体轨道 / 资源下载</h3>
+        <div class="resource-title-row">
+          <h3 class="resource-title">可用媒体与来源</h3>
+          <span class="resource-status ${downloadableItems.length ? "ready" : "fallback"}">${downloadableItems.length ? `${downloadableItems.length} 项可保存` : "已保留原链接"}</span>
+        </div>
         <div class="download-options">
           ${downloadableItems.length ? downloadableItems.map((item) => `
             <div class="download-item">
@@ -382,8 +425,8 @@ function renderResult(data) {
               </div>
               <span class="pill">${escapeHtml(item.quality)}</span>
               <div class="item-actions">
-                ${item.url ? `<button class="download-link view-btn" type="button" data-action="download" data-url="${escapeHtml(item.url)}" data-label="${escapeHtml(item.label)}" data-ext="${escapeHtml(item.ext || "")}">下载</button>` : ""}
-                ${item.url ? `<button class="ghost-button copy-btn" type="button" data-action="copy" data-url="${escapeHtml(item.url)}">复制</button>` : ""}
+                ${item.url ? `<button class="download-link view-btn" type="button" data-action="download" data-url="${escapeHtml(item.url)}" data-label="${escapeHtml(item.label)}" data-ext="${escapeHtml(item.ext || "")}">保存资源</button>` : ""}
+                ${item.url ? `<button class="ghost-button copy-btn" type="button" data-action="copy" data-url="${escapeHtml(item.url)}">复制链接</button>` : ""}
               </div>
             </div>
           `).join("") : `<p class="empty">没有拿到可用音频、视频或图片资源。${escapeHtml(extractorHint || displayNote || "这个链接可能需要 Cookie、登录态或稍后再试。")}</p>`}
@@ -393,12 +436,12 @@ function renderResult(data) {
       ${paletteHtml}
 
       <div class="card-notes-section">
-        <label for="cardNote">✍️ 灵感备忘笔记 (自动记录)</label>
+        <label for="cardNote">灵感备忘笔记 <span class="save-state" id="saveState" role="status">已同步到本地</span></label>
         <textarea id="cardNote" placeholder="在此写下你对该素材的想法，如: 配色极其舒服、转场过渡非常巧妙，打算用在下期设计中。">${escapeHtml(savedNote)}</textarea>
       </div>
 
       <div class="card-tags-section">
-        <label for="cardTags">🏷️ 灵感标签 (自动记录)</label>
+        <label for="cardTags">灵感标签</label>
         <input type="text" id="cardTags" placeholder="设计, 调色, 动效参考" value="${escapeHtml(savedTags.join(", "))}">
       </div>
 
@@ -411,9 +454,16 @@ function renderResult(data) {
   // Dynamic Auto-Saving listeners
   const noteArea = resultPanel.querySelector("#cardNote");
   const tagsInput = resultPanel.querySelector("#cardTags");
+  const saveState = resultPanel.querySelector("#saveState");
+  let saveTimer;
   
   const autoSave = () => {
-    updateHistoryNotesAndTags(data.url, noteArea.value, tagsInput.value);
+    if (saveState) saveState.textContent = "正在保存…";
+    window.clearTimeout(saveTimer);
+    saveTimer = window.setTimeout(() => {
+      updateHistoryNotesAndTags(data.url, noteArea.value, tagsInput.value);
+      if (saveState) saveState.textContent = "已同步到本地";
+    }, 260);
   };
   
   noteArea.addEventListener("input", autoSave);
@@ -438,6 +488,10 @@ resultPanel.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-action]");
   if (!button) return;
   const action = button.dataset.action;
+  if (action === "copy-color") {
+    copyToClipboard(button.dataset.value || "", button);
+    return;
+  }
   const itemUrl = button.dataset.url;
   if (!itemUrl) return;
 
@@ -456,16 +510,38 @@ form.addEventListener("submit", async (event) => {
   const url = input.value.trim();
   if (!url) return;
 
+  submitButton.disabled = true;
+  submitButton.setAttribute("aria-busy", "true");
+  submitButton.dataset.label = submitButton.textContent;
+  submitButton.textContent = "正在整理…";
+  form.classList.add("is-processing");
+  modePills.forEach((pill, index) => pill.classList.toggle("active", index === 0));
   resultPanel.hidden = false;
   resultPanel.innerHTML = `
     <div class="result-loading">
       <div class="spinner"></div>
       <div>
-        <h3>正在提取多维矩阵...</h3>
-        <p>正在识别来源并构建可关联的多媒体素材节点</p>
+        <h3 id="loadingTitle">正在识别链接来源</h3>
+        <p id="loadingDetail">连接服务并检查可用媒体，请稍候</p>
+        <div class="loading-track"><span></span></div>
       </div>
     </div>
   `;
+
+  const loadingTitle = resultPanel.querySelector("#loadingTitle");
+  const loadingDetail = resultPanel.querySelector("#loadingDetail");
+  const stages = [
+    ["正在检查可用媒体", "平台提取可能需要数秒", 1],
+    ["正在构建素材卡片", "整理媒体轨道、来源与本地记录", 2]
+  ];
+  let stageIndex = 0;
+  const stageTimer = window.setInterval(() => {
+    const stage = stages[Math.min(stageIndex, stages.length - 1)];
+    if (loadingTitle) loadingTitle.textContent = stage[0];
+    if (loadingDetail) loadingDetail.textContent = stage[1];
+    modePills.forEach((pill, index) => pill.classList.toggle("active", index === stage[2]));
+    stageIndex += 1;
+  }, 2400);
 
   if (window.innerWidth <= 768) {
     resultPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -499,6 +575,13 @@ form.addEventListener("submit", async (event) => {
     });
   } catch (error) {
     renderError(error.message);
+  } finally {
+    window.clearInterval(stageTimer);
+    modePills.forEach((pill, index) => pill.classList.toggle("active", index === 2));
+    submitButton.disabled = false;
+    submitButton.removeAttribute("aria-busy");
+    submitButton.textContent = submitButton.dataset.label || "生成素材卡片";
+    form.classList.remove("is-processing");
   }
 });
 
@@ -514,6 +597,12 @@ pasteButton.addEventListener("click", async () => {
 
 // View from History click
 historyList.addEventListener("click", (event) => {
+  const actionButton = event.target.closest("button[data-action]");
+  if (actionButton?.dataset.action === "copy-history") {
+    event.stopPropagation();
+    copyToClipboard(actionButton.dataset.url || "", actionButton);
+    return;
+  }
   const card = event.target.closest(".history-card");
   if (!card) return;
 
@@ -526,7 +615,7 @@ historyList.addEventListener("click", (event) => {
       url: match.url,
       platform: { name: match.platform },
       title: match.title,
-      note: "从您的历史灵感矩阵调取了该素材。",
+      note: "已从本地灵感历史调取该素材。",
       items: match.items
     });
     resultPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -634,17 +723,60 @@ if (copyExportBtn) {
 
 renderHistory();
 updateStats();
+checkApiHealth();
 
-// --- Interactive Particle Node connections simulator & Cursor Sparks ---
+// Progressive motion layer inspired by modern spotlight/reveal patterns.
+const revealItems = [...document.querySelectorAll(".reveal-on-scroll")];
+if (reduceMotionQuery.matches || !("IntersectionObserver" in window)) {
+  revealItems.forEach((item) => item.classList.add("is-visible"));
+} else {
+  document.documentElement.classList.add("motion-ready");
+  const revealObserver = new IntersectionObserver((entries, observer) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      entry.target.classList.add("is-visible");
+      observer.unobserve(entry.target);
+    });
+  }, { threshold: 0.12, rootMargin: "0px 0px -7%" });
+  revealItems.forEach((item) => revealObserver.observe(item));
+}
+
+document.querySelectorAll(".platform-card, .step-card, .history-card, .labs-container, .app-preview, .extension-preview")
+  .forEach((card) => card.classList.add("spotlight-card"));
+document.addEventListener("pointermove", (event) => {
+  const card = event.target.closest(".spotlight-card");
+  if (!card) return;
+  const rect = card.getBoundingClientRect();
+  card.style.setProperty("--spot-x", `${event.clientX - rect.left}px`);
+  card.style.setProperty("--spot-y", `${event.clientY - rect.top}px`);
+}, { passive: true });
+
+if (cursorGlow && !reduceMotionQuery.matches && window.matchMedia("(pointer: fine)").matches) {
+  window.addEventListener("pointermove", (event) => {
+    cursorGlow.style.left = `${event.clientX}px`;
+    cursorGlow.style.top = `${event.clientY}px`;
+    cursorGlow.style.opacity = "1";
+  }, { passive: true });
+  document.addEventListener("mouseleave", () => {
+    cursorGlow.style.opacity = "0";
+  });
+}
+
+// --- Layered star field, constellation network & cursor stardust ---
 const canvas = document.getElementById("matrixParticles");
-if (canvas) {
+if (canvas && !reduceMotionQuery.matches) {
   const ctx = canvas.getContext("2d");
+  let stars = [];
   let particles = [];
   let ambientOrbs = [];
   let sparks = [];
-  const particleCount = 210; // Significantly denser network nodes
-  const orbCount = 28;       // Background blurry ambient nebula orbs
-  let mouse = { x: null, y: null, radius: 170 }; // Magnetic influence zone
+  let shootingStars = [];
+  let nextShootingStarAt = performance.now() + 2400;
+  let animationFrameId = 0;
+  const starCount = Math.min(150, Math.max(80, Math.round(window.innerWidth / 9)));
+  const particleCount = Math.min(42, Math.max(24, Math.round(window.innerWidth / 34)));
+  const orbCount = 6;
+  let mouse = { x: null, y: null, radius: 150 };
 
   // Sparks node class for mouse trails (Elegant theme-synchronized single tone)
   class Spark {
@@ -685,11 +817,8 @@ if (canvas) {
     mouse.x = e.clientX;
     mouse.y = e.clientY;
     
-    // Spawn subtle single-tone trail sparks
-    for (let i = 0; i < 2; i++) {
-      if (sparks.length < 150) {
-        sparks.push(new Spark(e.clientX, e.clientY));
-      }
+    if (sparks.length < 36) {
+      sparks.push(new Spark(e.clientX, e.clientY));
     }
   });
 
@@ -701,11 +830,97 @@ if (canvas) {
   function resizeCanvas() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
+    if (stars.length) initParticles();
   }
   window.addEventListener("resize", resizeCanvas);
   resizeCanvas();
 
-  // Layer 1: Ambient blurry slow-drifting background nebula orbs
+  // Layer 1: React Bits-inspired depth stars with independent twinkle phases.
+  class DepthStar {
+    constructor() {
+      this.reset(true);
+    }
+
+    reset(randomY = false) {
+      this.x = Math.random() * canvas.width;
+      this.y = randomY ? Math.random() * canvas.height : -8;
+      this.depth = Math.random() * 0.75 + 0.25;
+      this.radius = 0.35 + this.depth * 1.15;
+      this.alpha = Math.random() * 0.42 + 0.28;
+      this.phase = Math.random() * Math.PI * 2;
+      this.twinkleSpeed = Math.random() * 0.0018 + 0.0007;
+      this.drift = Math.random() * 0.018 + 0.006;
+      this.hue = [205, 220, 156, 268][Math.floor(Math.random() * 4)];
+      this.flare = Math.random() > 0.92;
+    }
+
+    update() {
+      this.y += this.drift * this.depth;
+      if (this.y > canvas.height + 8) this.reset(false);
+    }
+
+    draw(isDark, time) {
+      const parallaxX = mouse.x === null ? 0 : (mouse.x - canvas.width / 2) * -0.009 * this.depth;
+      const parallaxY = mouse.y === null ? 0 : (mouse.y - canvas.height / 2) * -0.006 * this.depth;
+      const pulse = 0.68 + Math.sin(time * this.twinkleSpeed + this.phase) * 0.32;
+      const opacity = this.alpha * pulse * (isDark ? 1 : 0.62);
+      const x = this.x + parallaxX;
+      const y = this.y + parallaxY;
+
+      ctx.beginPath();
+      ctx.arc(x, y, this.radius, 0, Math.PI * 2);
+      ctx.fillStyle = `hsla(${this.hue}, 92%, ${isDark ? 78 : 52}%, ${opacity})`;
+      ctx.fill();
+
+      if (this.flare && pulse > 0.82) {
+        ctx.beginPath();
+        ctx.moveTo(x - this.radius * 3.6, y);
+        ctx.lineTo(x + this.radius * 3.6, y);
+        ctx.moveTo(x, y - this.radius * 3.6);
+        ctx.lineTo(x, y + this.radius * 3.6);
+        ctx.strokeStyle = `hsla(${this.hue}, 96%, 78%, ${opacity * 0.48})`;
+        ctx.lineWidth = 0.55;
+        ctx.stroke();
+      }
+    }
+  }
+
+  class ShootingStar {
+    constructor() {
+      this.x = Math.random() * canvas.width * 0.65;
+      this.y = Math.random() * canvas.height * 0.32;
+      this.vx = Math.random() * 2.4 + 5.2;
+      this.vy = this.vx * (Math.random() * 0.24 + 0.36);
+      this.life = 1;
+      this.decay = Math.random() * 0.012 + 0.014;
+      this.length = Math.random() * 54 + 72;
+    }
+
+    update() {
+      this.x += this.vx;
+      this.y += this.vy;
+      this.life -= this.decay;
+    }
+
+    draw(isDark) {
+      const speed = Math.hypot(this.vx, this.vy);
+      const tailX = this.x - (this.vx / speed) * this.length;
+      const tailY = this.y - (this.vy / speed) * this.length;
+      const gradient = ctx.createLinearGradient(this.x, this.y, tailX, tailY);
+      const opacity = Math.max(0, this.life) * (isDark ? 0.72 : 0.28);
+      gradient.addColorStop(0, `rgba(255, 255, 255, ${opacity})`);
+      gradient.addColorStop(0.18, `rgba(125, 211, 252, ${opacity * 0.72})`);
+      gradient.addColorStop(1, "rgba(96, 165, 250, 0)");
+      ctx.beginPath();
+      ctx.moveTo(this.x, this.y);
+      ctx.lineTo(tailX, tailY);
+      ctx.strokeStyle = gradient;
+      ctx.lineWidth = isDark ? 1.25 : 0.8;
+      ctx.stroke();
+    }
+  }
+
+  // Layer 2: Ambient blurry slow-drifting nebula orbs.
   class AmbientOrb {
     constructor() {
       this.x = Math.random() * canvas.width;
@@ -747,7 +962,7 @@ if (canvas) {
     }
   }
 
-  // Layer 2: Interactive Foreground constellation network (with gravity vortex)
+  // Layer 3: Interactive foreground constellation network.
   class NetworkNode {
     constructor() {
       this.x = Math.random() * canvas.width;
@@ -784,7 +999,7 @@ if (canvas) {
         const dy = mouse.y - this.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
         
-        if (dist < mouse.radius) {
+        if (dist > 0.01 && dist < mouse.radius) {
           // Force is stronger near the center of the cursor
           const force = (mouse.radius - dist) / mouse.radius;
           
@@ -831,9 +1046,13 @@ if (canvas) {
   }
 
   function initParticles() {
+    stars = [];
     particles = [];
     ambientOrbs = [];
-    
+
+    for (let i = 0; i < starCount; i++) {
+      stars.push(new DepthStar());
+    }
     for (let i = 0; i < orbCount; i++) {
       ambientOrbs.push(new AmbientOrb());
     }
@@ -843,17 +1062,33 @@ if (canvas) {
   }
   initParticles();
 
-  function animate() {
+  function animate(time = performance.now()) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     const isDark = document.body.classList.contains("dark");
-    
-    // Draw Layer 1: Atmospheric Blurry Nebula Orbs
+
+    // Draw distant stars before the atmospheric color and constellation layers.
+    for (let i = 0; i < stars.length; i++) {
+      stars[i].update();
+      stars[i].draw(isDark, time);
+    }
+
+    if (time >= nextShootingStarAt && shootingStars.length < 2) {
+      shootingStars.push(new ShootingStar());
+      nextShootingStarAt = time + Math.random() * 6500 + 6000;
+    }
+    shootingStars = shootingStars.filter((star) => {
+      star.update();
+      star.draw(isDark);
+      return star.life > 0 && star.x < canvas.width + 160 && star.y < canvas.height + 100;
+    });
+
+    // Draw atmospheric blurry nebula orbs.
     for (let i = 0; i < ambientOrbs.length; i++) {
       ambientOrbs[i].update();
       ambientOrbs[i].draw();
     }
 
-    // Draw Layer 2: main network nodes & connected web lines with linear gradients
+    // Draw main constellation nodes and connected lines.
     for (let i = 0; i < particles.length; i++) {
       particles[i].update();
       particles[i].draw(isDark);
@@ -862,11 +1097,11 @@ if (canvas) {
         const dx = particles[i].x - particles[j].x;
         const dy = particles[i].y - particles[j].y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < 130) { 
+        if (dist < 118) {
           ctx.beginPath();
           // Dynamic linear gradient connecting node i and j based on their coordinate vector
           const grad = ctx.createLinearGradient(particles[i].x, particles[i].y, particles[j].x, particles[j].y);
-          const fade = 1 - dist / 130;
+          const fade = 1 - dist / 118;
           const baseLineOpacity = isDark ? 0.16 : 0.08;
           const finalOpacity = fade * baseLineOpacity;
           
@@ -882,14 +1117,23 @@ if (canvas) {
       }
     }
 
-    // Draw and prune Layer 3: theme-synchronized stardust mouse trail
+    // Draw and prune theme-synchronized cursor stardust.
     sparks = sparks.filter(spark => {
       spark.update();
       spark.draw();
       return spark.life > 0;
     });
 
-    requestAnimationFrame(animate);
+    animationFrameId = requestAnimationFrame(animate);
   }
-  animate();
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      cancelAnimationFrame(animationFrameId);
+    } else {
+      animationFrameId = requestAnimationFrame(animate);
+    }
+  });
+
+  animationFrameId = requestAnimationFrame(animate);
 }
