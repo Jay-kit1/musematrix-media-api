@@ -83,6 +83,12 @@ assert.equal(douyinMusic.url, "https://sf6-cdn-tos.douyinstatic.com/obj/ies-musi
 const douyinRouterHtml = `<script>window._ROUTER_DATA = {"loaderData":{"video_(id)/page":{"videoInfoRes":{"item_list":[{"aweme_id":"7649964138193753454","desc":"测试抖音视频","author":{"nickname":"测试作者"},"video":{"play_addr":{"uri":"video-1","url_list":["https://aweme.snssdk.com/aweme/v1/playwm/?video_id=video-1"]},"cover":{"url_list":["https://p11-sign.douyinpic.com/demo.webp"]},"height":1920,"width":1080,"duration":43000},"music":{"mid":"music-1","title":"测试原声","play_url":{"url_list":["https://sf6-cdn-tos.douyinstatic.com/obj/ies-music/demo.mp3"]}}}]}}}}}</script>`;
 const douyinShareItem = getDouyinShareItemFromHtml(douyinRouterHtml);
 assert.equal(douyinShareItem.aweme_id, "7649964138193753454");
+const douyinDynamicRouteHtml = `<script>window._ROUTER_DATA = {"loaderData":{"share-video-route-v2":{"videoInfoRes":{"item_list":[{"aweme_id":"7673729708105714980","desc":"动态路由 fixture","video":{"play_addr":{"url_list":["https://aweme.snssdk.com/aweme/v1/play/?video_id=video-2"]}}}]}}}}</script>`;
+assert.equal(
+  getDouyinShareItemFromHtml(douyinDynamicRouteHtml)?.aweme_id,
+  "7673729708105714980",
+  "Douyin share parser should not depend on one fixed loaderData route key"
+);
 const douyinShareResult = buildDouyinShareResult(
   douyinShareItem,
   "https://v.douyin.com/UhUIZ7Ahvbs/",

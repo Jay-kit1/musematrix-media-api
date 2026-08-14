@@ -672,7 +672,9 @@ function extractAssignedJson(html, assignmentName) {
 function getDouyinShareItemFromHtml(html) {
   const routerData = extractAssignedJson(html, "window._ROUTER_DATA");
   const loaderData = routerData && routerData.loaderData ? routerData.loaderData : {};
-  const pageData = loaderData["video_(id)/page"] || loaderData["video_(id)\\u002Fpage"] || {};
+  const pageData = Object.values(loaderData).find((entry) =>
+    entry && typeof entry === "object" && entry.videoInfoRes
+  ) || {};
   const itemList = pageData.videoInfoRes && Array.isArray(pageData.videoInfoRes.item_list)
     ? pageData.videoInfoRes.item_list
     : [];
