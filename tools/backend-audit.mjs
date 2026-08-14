@@ -7,6 +7,8 @@ const {
   isPrivateIp,
   createPinnedLookup,
   getDouyinShareCandidates,
+  buildSnapAnyHeaders,
+  buildSnapAnyResult,
   extractBilibiliId,
   extractDouyinAwemeId,
   buildDouyinMusicItem,
@@ -48,6 +50,28 @@ assert.deepEqual(
     "https://v.douyin.com/K8ebVWVxWiU/"
   ]
 );
+assert.equal(
+  buildSnapAnyHeaders("https://v.douyin.com/K8ebVWVxWiU/", "en", 1786683496000)["G-Footer"],
+  "d3211ab24a7179b288f82cce08d7d4bd2974e3e65cbebd12a4fa27f3105ac926"
+);
+const snapAnyDouyinFixture = buildSnapAnyResult({
+  id: "7673729708105714980",
+  text: "测试抖音作品",
+  medias: [
+    {
+      media_type: "video",
+      resource_url: "https://v5-se-ex-mc-e.douyinvod.com/demo.mp4",
+      preview_url: "https://p3-pc-sign.douyinpic.com/demo.jpeg"
+    },
+    {
+      media_type: "audio",
+      resource_url: "https://sf11-cdn-tos.douyinstatic.com/obj/ies-music/demo.mp3"
+    }
+  ]
+}, "https://v.douyin.com/K8ebVWVxWiU/", { name: "抖音 / TikTok" }, {});
+assert.equal(snapAnyDouyinFixture.sourceDetail.extractor, "snapany-fallback");
+assert.equal(snapAnyDouyinFixture.items.some((item) => item.type === "视频"), true);
+assert.equal(snapAnyDouyinFixture.items.some((item) => item.type === "音频"), true);
 assert.equal(isDouyinLikeUrl("https://v.douyin.com/UhUIZ7Ahvbs/"), true);
 assert.equal(isDouyinLikeUrl("https://www.tiktok.com/@user/video/7253412088251534594"), false);
 assert.equal(isTikTokLikeUrl("https://www.tiktok.com/@user/video/7253412088251534594"), true);

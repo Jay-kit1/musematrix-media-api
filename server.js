@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const dns = require("dns").promises;
 const net = require("net");
+const crypto = require("crypto");
 const { execFile } = require("child_process");
 
 
@@ -19,6 +20,7 @@ const downloadTimeoutMs = Number(process.env.DOWNLOAD_TIMEOUT_MS || 30000);
 const parseCacheTtlMs = Number(process.env.PARSE_CACHE_TTL_MS || 90000);
 const corsOrigin = process.env.CORS_ORIGIN || "*";
 const exposeErrorDetails = process.env.EXPOSE_ERROR_DETAILS === "true";
+const snapAnyClientSigningKey = process.env.SNAPANY_CLIENT_SIGNING_KEY || "a5wU-SVyy5gXIyMbPQIfIz7UP7rCBp76U8Z8i-FtDMU";
 const browserUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36";
 let runtimeCookiePath = "";
 const parseCache = new Map();
@@ -315,6 +317,9 @@ async function requestUrl(targetUrl, options = {}) {
   const timeout = options.timeout || 10000;
   const deadlineAt = options.deadlineAt || Date.now() + timeout;
   const method = options.method || "GET";
+  const requestBody = typeof options.body === "string" || Buffer.isBuffer(options.body)
+    ? options.body
+    : "";
   const redirectCount = options.redirectCount || 0;
   const headers = {
     "User-Agent": browserUserAgent,
@@ -407,7 +412,7 @@ async function requestUrl(targetUrl, options = {}) {
 
     req.on("timeout", () => req.destroy(new Error("请求目标网站超时")));
     req.on("error", finishReject);
-    req.end();
+    req.end(requestBody);
   });
 }
 
@@ -705,6 +710,97 @@ function getDouyinShareCandidates(cleanUrl, extractorInfo = {}) {
     ? [`https://www.iesdouyin.com/share/video/${awemeId}`, cleanUrl]
     : [cleanUrl];
   return [...new Set(candidates)];
+}
+
+function buildSnapAnyHeaders(cleanUrl, locale = "en", timestamp = Date.now()) {
+  const timestampText = String(timestamp);
+  return {
+    "Accept": "application/json",
+    "Accept-Language": locale,
+    "Content-Type": "application/json",
+    "G-Timezone": "Asia/Shanghai",
+    "G-Timestamp": timestampText,
+    "G-Footer": crypto
+      .createHmac("sha256", snapAnyClientSigningKey)
+      .update(`${cleanUrl}${locale}${timestampText}`)
+      .digest("hex"),
+    "Origin": "https://snapany.com",
+    "Referer": "https://snapany.com/",
+    "X-No-Error-Toast": "1"
+  };
+}
+
+function buildSnapAnyResult(apiResponse, cleanUrl, platform, sourceDetail) {
+  const medias = apiResponse && Array.isArray(apiResponse.medias) ? apiResponse.medias : [];
+  const usable = medias.filter((media) =>
+    media &&
+    ["video", "audio", "image"].includes(media.media_type) &&
+    /^https?:\/\//.test(media.resource_url || "")
+  );
+  if (!usable.length) return null;
+
+  const commonHeaders = {
+    "User-Agent": browserUserAgent,
+    "Referer": "https://www.douyin.com/",
+    "Origin": "https://www.douyin.com"
+  };
+  const items = [];
+  const previewUrl = usable.find((media) => /^https?:\/\//.test(media.preview_url || ""))?.preview_url || "";
+  if (previewUrl) {
+    items.push({
+      label: "封面图片",
+      quality: "Cover",
+      type: "图片",
+      action: "open",
+      url: previewUrl,
+      ext: "jpg"
+    });
+  }
+  usable.forEach((media) => {
+    const type = media.media_type === "video" ? "视频" : media.media_type === "audio" ? "音频" : "图片";
+    items.push({
+      label: type === "视频" ? "MP4 视频" : type === "音频" ? "MP3 音频" : "图片资源",
+      quality: type === "视频" ? "MP4" : type === "音频" ? "Original Sound" : "Image",
+      type,
+      action: "open",
+      url: media.resource_url,
+      ext: type === "视频" ? "mp4" : type === "音频" ? "mp3" : "jpg",
+      size: 0,
+      headers: commonHeaders
+    });
+  });
+
+  return {
+    url: cleanUrl,
+    platform,
+    title: `${apiResponse.text || apiResponse.title || "抖音作品"} · 媒体已提取`,
+    note: "主提取器受平台风控限制，已通过冗余解析通道获取公开视频、原声音频和封面。请只处理你有权使用或平台允许保存的内容。",
+    sourceDetail: {
+      ...sourceDetail,
+      extractor: "snapany-fallback",
+      title: apiResponse.title || apiResponse.text || "",
+      awemeId: apiResponse.id || "",
+      thumbnail: previewUrl
+    },
+    items: items.slice(0, 12)
+  };
+}
+
+async function extractSnapAnyDouyin(cleanUrl, platform, sourceDetail) {
+  if (!isDouyinLikeUrl(cleanUrl)) return null;
+  const body = JSON.stringify({ link: cleanUrl });
+  const response = await requestUrl("https://api.snapany.com/v1/extract/post", {
+    method: "POST",
+    body,
+    limit: maxRemoteJsonBytes,
+    timeout: 20000,
+    headers: {
+      ...buildSnapAnyHeaders(cleanUrl),
+      "Content-Length": Buffer.byteLength(body)
+    }
+  });
+  if (response.statusCode < 200 || response.statusCode >= 300 || response.truncated) return null;
+  return buildSnapAnyResult(JSON.parse(response.body || "{}"), cleanUrl, platform, sourceDetail);
 }
 
 function buildTikwmResult(apiResponse, cleanUrl, platform, sourceDetail) {
@@ -1434,6 +1530,10 @@ async function buildResults(rawUrl) {
     if (directShareResult) {
       return directShareResult;
     }
+    const redundantResult = await extractSnapAnyDouyin(cleanUrl, platform, sourceDetail).catch(() => null);
+    if (redundantResult) {
+      return redundantResult;
+    }
   }
   if (tiktokFallback) {
     return tiktokFallback;
@@ -1670,6 +1770,8 @@ module.exports = {
   isPrivateIp,
   createPinnedLookup,
   getDouyinShareCandidates,
+  buildSnapAnyHeaders,
+  buildSnapAnyResult,
   extractBilibiliId,
   extractDouyinAwemeId,
   buildDouyinMusicItem,
