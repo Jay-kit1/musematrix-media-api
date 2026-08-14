@@ -699,6 +699,14 @@ function isTikTokLikeUrl(cleanUrl) {
   }
 }
 
+function getDouyinShareCandidates(cleanUrl, extractorInfo = {}) {
+  const awemeId = extractDouyinAwemeId(cleanUrl, extractorInfo);
+  const candidates = awemeId
+    ? [`https://www.iesdouyin.com/share/video/${awemeId}`, cleanUrl]
+    : [cleanUrl];
+  return [...new Set(candidates)];
+}
+
 function buildTikwmResult(apiResponse, cleanUrl, platform, sourceDetail) {
   const data = apiResponse && apiResponse.code === 0 ? apiResponse.data : null;
   if (!data) return null;
@@ -877,20 +885,29 @@ function buildDouyinShareResult(item, cleanUrl, finalUrl, platform, sourceDetail
   };
 }
 
-async function extractDouyinShareHtml(cleanUrl, platform, sourceDetail) {
+async function extractDouyinShareHtml(cleanUrl, platform, sourceDetail, extractorInfo = {}) {
   if (!isDouyinLikeUrl(cleanUrl)) return null;
 
-  const response = await requestUrl(cleanUrl, {
-    limit: maxRemoteJsonBytes,
-    timeout: 15000,
-    headers: {
-      "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Referer": "https://www.douyin.com/"
+  for (const candidate of getDouyinShareCandidates(cleanUrl, extractorInfo)) {
+    try {
+      const response = await requestUrl(candidate, {
+        limit: maxRemoteJsonBytes,
+        timeout: 15000,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "zh-CN,zh;q=0.9",
+          "Referer": "https://www.douyin.com/"
+        }
+      });
+      const item = getDouyinShareItemFromHtml(response.body || "");
+      const result = buildDouyinShareResult(item, cleanUrl, response.finalUrl || candidate, platform, sourceDetail);
+      if (result) return result;
+    } catch {
+      // Try the next public share-page form before falling back to yt-dlp.
     }
-  });
-  const item = getDouyinShareItemFromHtml(response.body || "");
-  return buildDouyinShareResult(item, cleanUrl, response.finalUrl || cleanUrl, platform, sourceDetail);
+  }
+  return null;
 }
 
 function buildDouyinMusicItem(detail, referer) {
@@ -1407,6 +1424,17 @@ async function buildResults(rawUrl) {
     const enriched = await addPlatformExtraItems(extracted, cleanUrl, platform, extractorInfo || {});
     return mergeTikTokFallback(enriched, tiktokFallback);
   }
+  if (platform.name === "抖音 / TikTok" && isDouyinLikeUrl(cleanUrl)) {
+    const directShareResult = await extractDouyinShareHtml(
+      cleanUrl,
+      platform,
+      sourceDetail,
+      extractorInfo || {}
+    );
+    if (directShareResult) {
+      return directShareResult;
+    }
+  }
   if (tiktokFallback) {
     return tiktokFallback;
   }
@@ -1641,6 +1669,7 @@ module.exports = {
   getMediaKind,
   isPrivateIp,
   createPinnedLookup,
+  getDouyinShareCandidates,
   extractBilibiliId,
   extractDouyinAwemeId,
   buildDouyinMusicItem,

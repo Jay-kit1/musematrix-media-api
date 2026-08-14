@@ -6,6 +6,7 @@ const {
   detectPlatform,
   isPrivateIp,
   createPinnedLookup,
+  getDouyinShareCandidates,
   extractBilibiliId,
   extractDouyinAwemeId,
   buildDouyinMusicItem,
@@ -38,6 +39,15 @@ assert.equal(extractDouyinAwemeId("https://v.douyin.com/UhUIZ7Ahvbs/", { id: "76
 assert.equal(extractDouyinAwemeId("https://v.douyin.com/UhUIZ7Ahvbs/", {
   error: "ERROR: [Douyin] 7649964138193753454: Fresh cookies are needed"
 }), "7649964138193753454");
+assert.deepEqual(
+  getDouyinShareCandidates("https://v.douyin.com/K8ebVWVxWiU/", {
+    error: "ERROR: [Douyin] 7673729708105714980: Fresh cookies are needed"
+  }),
+  [
+    "https://www.iesdouyin.com/share/video/7673729708105714980",
+    "https://v.douyin.com/K8ebVWVxWiU/"
+  ]
+);
 assert.equal(isDouyinLikeUrl("https://v.douyin.com/UhUIZ7Ahvbs/"), true);
 assert.equal(isDouyinLikeUrl("https://www.tiktok.com/@user/video/7253412088251534594"), false);
 assert.equal(isTikTokLikeUrl("https://www.tiktok.com/@user/video/7253412088251534594"), true);
