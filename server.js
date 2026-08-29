@@ -50,6 +50,17 @@ function shouldRedirectLargeDownload(byteCount, limit = maxProxyDownloadBytes) {
   return Number(byteCount) > limit;
 }
 
+function isValidRangeHeader(value) {
+  return !value || /^bytes=\d*-\d*$/i.test(value);
+}
+
+function getRemoteTotalBytes(headers = {}) {
+  const contentRange = String(headers["content-range"] || "");
+  const rangeMatch = contentRange.match(/\/(\d+)$/);
+  if (rangeMatch) return Number(rangeMatch[1]);
+  return Number(headers["content-length"] || 0);
+}
+
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -1215,7 +1226,7 @@ async function extractBilibili(cleanUrl, platform, sourceDetail) {
   };
 }
 
-async function proxyRemoteFile(targetUrl, filename, res, redirectCount = 0) {
+async function proxyRemoteFile(targetUrl, filename, res, redirectCount = 0, clientRange = "") {
   const parsed = parseHttpUrl(targetUrl);
   const resolved = await assertPublicUrl(parsed);
 
@@ -1232,6 +1243,7 @@ async function proxyRemoteFile(targetUrl, filename, res, redirectCount = 0) {
     }
   };
   const requestHeaders = getProxyHeadersForHost(parsed.hostname);
+  if (clientRange) requestHeaders.Range = clientRange;
 
   const req = client.get(parsed, {
     timeout: downloadTimeoutMs,
@@ -1243,7 +1255,7 @@ async function proxyRemoteFile(targetUrl, filename, res, redirectCount = 0) {
     if ([301, 302, 303, 307, 308].includes(remoteRes.statusCode) && location && redirectCount < 4) {
       remoteRes.resume();
       try {
-        await proxyRemoteFile(new URL(location, parsed).toString(), filename, res, redirectCount + 1);
+        await proxyRemoteFile(new URL(location, parsed).toString(), filename, res, redirectCount + 1, clientRange);
       } catch (err) {
         finishWithError(400, err.message);
       }
@@ -1257,7 +1269,8 @@ async function proxyRemoteFile(targetUrl, filename, res, redirectCount = 0) {
     }
 
     const contentLength = Number(remoteRes.headers["content-length"] || 0);
-    if (exceedsDownloadLimit(contentLength)) {
+    const totalBytes = getRemoteTotalBytes(remoteRes.headers);
+    if (exceedsDownloadLimit(totalBytes)) {
       remoteRes.resume();
       finishWithError(413, "目标资源过大，已停止代理。");
       return;
@@ -1272,7 +1285,8 @@ async function proxyRemoteFile(targetUrl, filename, res, redirectCount = 0) {
       finishWithError(415, "目标地址不是可保存的媒体资源。");
       return;
     }
-    if (contentLength && shouldRedirectLargeDownload(contentLength)) {
+    const needsPlatformHeaders = Boolean(requestHeaders.Referer || requestHeaders.Origin);
+    if (totalBytes && shouldRedirectLargeDownload(totalBytes) && !needsPlatformHeaders) {
       completed = true;
       remoteRes.destroy();
       res.writeHead(302, {
@@ -1285,11 +1299,17 @@ async function proxyRemoteFile(targetUrl, filename, res, redirectCount = 0) {
     }
     let streamed = 0;
 
-    res.writeHead(200, {
+    const responseHeaders = {
       "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(safeName)}`,
       "Content-Type": contentType,
-      "Cache-Control": "no-store"
-    });
+      "Cache-Control": "no-store",
+      "Accept-Ranges": remoteRes.headers["accept-ranges"] || "bytes"
+    };
+    if (contentLength) responseHeaders["Content-Length"] = String(contentLength);
+    if (remoteRes.headers["content-range"]) {
+      responseHeaders["Content-Range"] = remoteRes.headers["content-range"];
+    }
+    res.writeHead(remoteRes.statusCode === 206 ? 206 : 200, responseHeaders);
 
     remoteRes.on("data", (chunk) => {
       if (completed) return;
@@ -1697,7 +1717,13 @@ const server = http.createServer((req, res) => {
       return;
     }
 
-    proxyRemoteFile(targetUrl, filename, res).catch((err) => {
+    const clientRange = String(req.headers.range || "");
+    if (!isValidRangeHeader(clientRange)) {
+      sendText(res, 416, "Range 请求格式不正确");
+      return;
+    }
+
+    proxyRemoteFile(targetUrl, filename, res, 0, clientRange).catch((err) => {
       if (!res.headersSent) {
         sendText(res, 400, err.message || "资源代理失败");
       }
@@ -1811,6 +1837,8 @@ module.exports = {
   exceedsDownloadLimit,
   resolveProxyDownloadLimit,
   shouldRedirectLargeDownload,
+  isValidRangeHeader,
+  getRemoteTotalBytes,
   extractBilibiliId,
   extractDouyinAwemeId,
   buildDouyinMusicItem,

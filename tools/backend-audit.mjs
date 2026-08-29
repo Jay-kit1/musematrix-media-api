@@ -13,6 +13,8 @@ const {
   exceedsDownloadLimit,
   resolveProxyDownloadLimit,
   shouldRedirectLargeDownload,
+  isValidRangeHeader,
+  getRemoteTotalBytes,
   extractBilibiliId,
   extractDouyinAwemeId,
   buildDouyinMusicItem,
@@ -40,6 +42,11 @@ assert.equal(resolveProxyDownloadLimit(), 100 * 1024 * 1024);
 assert.equal(resolveProxyDownloadLimit(String(600 * 1024 * 1024)), 512 * 1024 * 1024);
 assert.equal(shouldRedirectLargeDownload(reportedDouyinVideoBytes), true);
 assert.equal(shouldRedirectLargeDownload(90 * 1024 * 1024), false);
+assert.equal(isValidRangeHeader("bytes=0-63"), true);
+assert.equal(isValidRangeHeader("bytes=1048576-"), true);
+assert.equal(isValidRangeHeader("bytes=0-1,5-6"), false);
+assert.equal(getRemoteTotalBytes({ "content-range": "bytes 0-63/339952272", "content-length": "64" }), reportedDouyinVideoBytes);
+assert.equal(getRemoteTotalBytes({ "content-length": "123" }), 123);
 
 const douyinShare = "5.10 复制打开抖音，看看【Yangruikee的作品】 https://v.douyin.com/UhUIZ7Ahvbs/ BTy:/ T@y.gB";
 assert.equal(parseHttpUrl(douyinShare).toString(), "https://v.douyin.com/UhUIZ7Ahvbs/");
