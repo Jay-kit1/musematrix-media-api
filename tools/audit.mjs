@@ -28,6 +28,19 @@ check(
 );
 check("Keeps clipboard paste", files.js.includes("navigator.clipboard.readText"));
 check("Keeps theme toggle", files.js.includes("themeToggle"));
+check(
+  "Frontend assets use a cache-busting revision",
+  /styles\.css\?v=[^"']+/.test(files.html) && /app\.js\?v=[^"']+/.test(files.html)
+);
+check(
+  "Download actions are single-flight",
+  files.js.includes("activeDownloadKeys") && files.js.includes("button.disabled = true")
+);
+check(
+  "Downloads stay in the current tab",
+  !files.js.includes('a.target = "_blank"'),
+  "Do not combine target=_blank with redirected attachment downloads"
+);
 
 const publicCopy = files.html.replace(/<script[\s\S]*?<\/script>/g, "");
 const snapAnyMatches = publicCopy.match(/SnapAny/g) || [];

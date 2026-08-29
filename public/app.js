@@ -20,6 +20,8 @@ const audioPattern = /\.(mp3|m4a|wav|ogg|aac)(\?.*)?$/i;
 const imagePattern = /\.(jpg|jpeg|png|webp|gif|avif)(\?.*)?$/i;
 let backendDownloadAvailable = true;
 let healthRetryTimer = 0;
+const activeDownloadKeys = new Set();
+const downloadLockMs = 8000;
 const apiBase = String(window.MUSEMATRIX_API_BASE || "").replace(/\/+$/, "");
 
 function apiUrl(path) {
@@ -342,7 +344,18 @@ async function copyToClipboard(text, button) {
   }
 }
 
-function downloadTrack(url, label, ext = "") {
+function downloadTrack(url, label, ext = "", button = null) {
+  const downloadKey = String(url || "");
+  if (!downloadKey || activeDownloadKeys.has(downloadKey)) return false;
+  activeDownloadKeys.add(downloadKey);
+
+  const originalLabel = button ? button.textContent : "";
+  if (button) {
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    button.textContent = "下载已开始";
+  }
+
   const a = document.createElement("a");
   const parsedExt = (() => {
     try {
@@ -358,11 +371,21 @@ function downloadTrack(url, label, ext = "") {
     ? apiUrl(`/api/download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(filename)}`)
     : url;
   a.download = filename;
-  a.target = "_blank";
   a.rel = "noopener";
+  a.hidden = true;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+
+  window.setTimeout(() => {
+    activeDownloadKeys.delete(downloadKey);
+    if (button && button.isConnected) {
+      button.disabled = false;
+      button.removeAttribute("aria-busy");
+      button.textContent = originalLabel || "保存资源";
+    }
+  }, downloadLockMs);
+  return true;
 }
 
 function isDownloadableItem(item) {
@@ -510,7 +533,9 @@ resultPanel.addEventListener("click", (event) => {
   if (!itemUrl) return;
 
   if (action === "download") {
-    downloadTrack(itemUrl, button.dataset.label || "resource", button.dataset.ext || "");
+    event.preventDefault();
+    event.stopPropagation();
+    downloadTrack(itemUrl, button.dataset.label || "resource", button.dataset.ext || "", button);
     return;
   }
 

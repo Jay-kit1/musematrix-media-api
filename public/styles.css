@@ -790,6 +790,12 @@ body.dark .primary-button:hover {
   opacity: 0.9;
   transform: translateY(-1px);
 }
+
+.download-link.view-btn:disabled {
+  cursor: wait;
+  opacity: 0.7;
+  transform: none;
+}
 body.dark .download-link.view-btn {
   background: var(--line);
   color: var(--text);
