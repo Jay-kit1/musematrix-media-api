@@ -16,6 +16,7 @@ const maxMetadataBytes = 1024 * 256;
 const maxRemoteJsonBytes = 1024 * 1024 * 2;
 const defaultMaxDownloadBytes = 1024 * 1024 * 512;
 const maxDownloadBytes = resolveDownloadLimit(process.env.MAX_DOWNLOAD_BYTES);
+const maxProxyDownloadBytes = resolveProxyDownloadLimit(process.env.MAX_PROXY_DOWNLOAD_BYTES);
 const extractorTimeoutMs = Number(process.env.EXTRACTOR_TIMEOUT_MS || 45000);
 const downloadTimeoutMs = Number(process.env.DOWNLOAD_TIMEOUT_MS || 30000);
 const parseCacheTtlMs = Number(process.env.PARSE_CACHE_TTL_MS || 90000);
@@ -35,6 +36,17 @@ function resolveDownloadLimit(rawValue) {
 }
 
 function exceedsDownloadLimit(byteCount, limit = maxDownloadBytes) {
+  return Number(byteCount) > limit;
+}
+
+function resolveProxyDownloadLimit(rawValue) {
+  const parsed = Number(rawValue);
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.min(Math.floor(parsed), maxDownloadBytes)
+    : 1024 * 1024 * 100;
+}
+
+function shouldRedirectLargeDownload(byteCount, limit = maxProxyDownloadBytes) {
   return Number(byteCount) > limit;
 }
 
@@ -1260,6 +1272,17 @@ async function proxyRemoteFile(targetUrl, filename, res, redirectCount = 0) {
       finishWithError(415, "目标地址不是可保存的媒体资源。");
       return;
     }
+    if (contentLength && shouldRedirectLargeDownload(contentLength)) {
+      completed = true;
+      remoteRes.destroy();
+      res.writeHead(302, {
+        "Location": parsed.toString(),
+        "Cache-Control": "no-store",
+        "X-MuseMatrix-Download-Mode": "direct"
+      });
+      res.end();
+      return;
+    }
     let streamed = 0;
 
     res.writeHead(200, {
@@ -1786,6 +1809,8 @@ module.exports = {
   buildSnapAnyResult,
   resolveDownloadLimit,
   exceedsDownloadLimit,
+  resolveProxyDownloadLimit,
+  shouldRedirectLargeDownload,
   extractBilibiliId,
   extractDouyinAwemeId,
   buildDouyinMusicItem,

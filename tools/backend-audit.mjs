@@ -11,6 +11,8 @@ const {
   buildSnapAnyResult,
   resolveDownloadLimit,
   exceedsDownloadLimit,
+  resolveProxyDownloadLimit,
+  shouldRedirectLargeDownload,
   extractBilibiliId,
   extractDouyinAwemeId,
   buildDouyinMusicItem,
@@ -34,6 +36,10 @@ assert.equal(resolveDownloadLimit("1048576"), 1024 * 1024);
 assert.equal(resolveDownloadLimit("invalid"), 512 * 1024 * 1024);
 assert.equal(exceedsDownloadLimit(reportedDouyinVideoBytes), false);
 assert.equal(exceedsDownloadLimit(513 * 1024 * 1024), true);
+assert.equal(resolveProxyDownloadLimit(), 100 * 1024 * 1024);
+assert.equal(resolveProxyDownloadLimit(String(600 * 1024 * 1024)), 512 * 1024 * 1024);
+assert.equal(shouldRedirectLargeDownload(reportedDouyinVideoBytes), true);
+assert.equal(shouldRedirectLargeDownload(90 * 1024 * 1024), false);
 
 const douyinShare = "5.10 复制打开抖音，看看【Yangruikee的作品】 https://v.douyin.com/UhUIZ7Ahvbs/ BTy:/ T@y.gB";
 assert.equal(parseHttpUrl(douyinShare).toString(), "https://v.douyin.com/UhUIZ7Ahvbs/");
