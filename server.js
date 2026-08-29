@@ -794,12 +794,12 @@ function buildSnapAnyResult(apiResponse, cleanUrl, platform, sourceDetail) {
   usable.forEach((media) => {
     const type = media.media_type === "video" ? "视频" : media.media_type === "audio" ? "音频" : "图片";
     items.push({
-      label: type === "视频" ? "MP4 视频" : type === "音频" ? "MP3 音频" : "图片资源",
+      label: type === "视频" ? "MP4 视频" : type === "音频" ? "M4A 原声音频" : "图片资源",
       quality: type === "视频" ? "MP4" : type === "音频" ? "Original Sound" : "Image",
       type,
       action: "open",
       url: media.resource_url,
-      ext: type === "视频" ? "mp4" : type === "音频" ? "mp3" : "jpg",
+      ext: type === "视频" ? "mp4" : type === "音频" ? "m4a" : "jpg",
       size: 0,
       headers: commonHeaders
     });

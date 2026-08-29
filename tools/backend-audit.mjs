@@ -94,6 +94,7 @@ const snapAnyDouyinFixture = buildSnapAnyResult({
 assert.equal(snapAnyDouyinFixture.sourceDetail.extractor, "snapany-fallback");
 assert.equal(snapAnyDouyinFixture.items.some((item) => item.type === "视频"), true);
 assert.equal(snapAnyDouyinFixture.items.some((item) => item.type === "音频"), true);
+assert.equal(snapAnyDouyinFixture.items.find((item) => item.type === "音频").ext, "m4a");
 assert.equal(isDouyinLikeUrl("https://v.douyin.com/UhUIZ7Ahvbs/"), true);
 assert.equal(isDouyinLikeUrl("https://www.tiktok.com/@user/video/7253412088251534594"), false);
 assert.equal(isTikTokLikeUrl("https://www.tiktok.com/@user/video/7253412088251534594"), true);
