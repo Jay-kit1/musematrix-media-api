@@ -18,7 +18,8 @@ const directMediaPattern = /\.(mp4|webm|mov|m4v|mp3|m4a|wav|ogg|aac|jpg|jpeg|png
 const videoPattern = /\.(mp4|webm|mov|m4v)(\?.*)?$/i;
 const audioPattern = /\.(mp3|m4a|wav|ogg|aac)(\?.*)?$/i;
 const imagePattern = /\.(jpg|jpeg|png|webp|gif|avif)(\?.*)?$/i;
-let backendDownloadAvailable = false;
+let backendDownloadAvailable = true;
+let healthRetryTimer = 0;
 const apiBase = String(window.MUSEMATRIX_API_BASE || "").replace(/\/+$/, "");
 
 function apiUrl(path) {
@@ -36,7 +37,15 @@ function setApiStatus(state, label) {
   apiStatus.textContent = label;
 }
 
-async function checkApiHealth() {
+function scheduleHealthRetry(attempt) {
+  window.clearTimeout(healthRetryTimer);
+  const delays = [3000, 6000, 12000, 24000, 30000];
+  if (attempt >= delays.length) return;
+  healthRetryTimer = window.setTimeout(() => checkApiHealth(attempt + 1), delays[attempt]);
+}
+
+async function checkApiHealth(attempt = 0) {
+  window.clearTimeout(healthRetryTimer);
   setApiStatus("checking", "API CHECKING");
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), 8000);
@@ -45,17 +54,23 @@ async function checkApiHealth() {
       headers: { "Accept": "application/json" },
       signal: controller.signal
     });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
-    backendDownloadAvailable = data.status === "ok";
-    setApiStatus("online", "API ONLINE");
-    if (healthRevision) healthRevision.textContent = compactRevision(data.revision);
-    if (healthExtractor) healthExtractor.textContent = data.extractor || "ready";
+    if (data.status === "ok") {
+      backendDownloadAvailable = true;
+      setApiStatus("online", "API ONLINE");
+      if (healthRevision) healthRevision.textContent = compactRevision(data.revision);
+      if (healthExtractor) healthExtractor.textContent = data.extractor || "ready";
+      return;
+    }
+    setApiStatus("checking", "API WAKING");
+    if (healthRevision) healthRevision.textContent = "waking";
+    if (healthExtractor) healthExtractor.textContent = data.extractor || "starting";
+    scheduleHealthRetry(attempt);
   } catch {
-    backendDownloadAvailable = false;
-    setApiStatus("offline", "STATIC MODE");
-    if (healthRevision) healthRevision.textContent = "offline";
-    if (healthExtractor) healthExtractor.textContent = "fallback";
+    setApiStatus("checking", "API WAKING");
+    if (healthRevision) healthRevision.textContent = "waking";
+    if (healthExtractor) healthExtractor.textContent = "retrying";
+    scheduleHealthRetry(attempt);
   } finally {
     window.clearTimeout(timeoutId);
   }
@@ -227,7 +242,6 @@ async function parseWithOptionalBackend(rawValue) {
     backendDownloadAvailable = true;
     return { ...data, url: data.url || url };
   } catch (error) {
-    backendDownloadAvailable = false;
     const message = error.name === "AbortError" ? "请求超时，已切换到静态识别模式" : error.message;
     return staticParse(rawValue, message);
   } finally {
@@ -724,6 +738,10 @@ if (copyExportBtn) {
 renderHistory();
 updateStats();
 checkApiHealth();
+window.addEventListener("online", () => checkApiHealth());
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) checkApiHealth();
+});
 
 // Progressive motion layer inspired by modern spotlight/reveal patterns.
 const revealItems = [...document.querySelectorAll(".reveal-on-scroll")];
