@@ -33,13 +33,15 @@ const {
 } = backend;
 
 const reportedDouyinVideoBytes = 339_952_272;
-assert.equal(resolveDownloadLimit(), 512 * 1024 * 1024);
+const longDouyinTutorialBytes = 545_375_451;
+assert.equal(resolveDownloadLimit(), 2 * 1024 * 1024 * 1024);
 assert.equal(resolveDownloadLimit("1048576"), 1024 * 1024);
-assert.equal(resolveDownloadLimit("invalid"), 512 * 1024 * 1024);
+assert.equal(resolveDownloadLimit("invalid"), 2 * 1024 * 1024 * 1024);
 assert.equal(exceedsDownloadLimit(reportedDouyinVideoBytes), false);
-assert.equal(exceedsDownloadLimit(513 * 1024 * 1024), true);
+assert.equal(exceedsDownloadLimit(longDouyinTutorialBytes), false);
+assert.equal(exceedsDownloadLimit(2 * 1024 * 1024 * 1024 + 1), true);
 assert.equal(resolveProxyDownloadLimit(), 100 * 1024 * 1024);
-assert.equal(resolveProxyDownloadLimit(String(600 * 1024 * 1024)), 512 * 1024 * 1024);
+assert.equal(resolveProxyDownloadLimit(String(600 * 1024 * 1024)), 600 * 1024 * 1024);
 assert.equal(shouldRedirectLargeDownload(reportedDouyinVideoBytes), true);
 assert.equal(shouldRedirectLargeDownload(90 * 1024 * 1024), false);
 assert.equal(isValidRangeHeader("bytes=0-63"), true);
@@ -240,6 +242,7 @@ assert.equal(topLevelOnly.items.some((item) => item.type === "视频" && item.ex
 assert.equal(getProxyHeadersForHost("upos-sz-mirrorcos.bilivideo.com").Referer, "https://www.bilibili.com/");
 assert.equal(getProxyHeadersForHost("v16-webapp-prime.tiktokcdn-us.com").Referer, "https://www.tiktok.com/");
 assert.equal(getProxyHeadersForHost("v3-dy-o.zjcdn.com").Referer, "https://www.douyin.com/");
+assert.equal(getProxyHeadersForHost("cdn.example/v5-ex-e.douyinvod.com/video").Referer, "https://www.douyin.com/");
 assert.equal(getProxyHeadersForHost("rr1---sn.googlevideo.com").Referer, "https://www.youtube.com/");
 
 assert.match(explainExtractorError("Fresh cookies are needed"), /Cookie/);

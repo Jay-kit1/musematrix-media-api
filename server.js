@@ -14,7 +14,7 @@ const host = process.env.HOST || "127.0.0.1";
 const maxJsonBodySize = 1024 * 32;
 const maxMetadataBytes = 1024 * 256;
 const maxRemoteJsonBytes = 1024 * 1024 * 2;
-const defaultMaxDownloadBytes = 1024 * 1024 * 512;
+const defaultMaxDownloadBytes = 1024 * 1024 * 1024 * 2;
 const maxDownloadBytes = resolveDownloadLimit(process.env.MAX_DOWNLOAD_BYTES);
 const maxProxyDownloadBytes = resolveProxyDownloadLimit(process.env.MAX_PROXY_DOWNLOAD_BYTES);
 const extractorTimeoutMs = Number(process.env.EXTRACTOR_TIMEOUT_MS || 45000);
@@ -1242,7 +1242,7 @@ async function proxyRemoteFile(targetUrl, filename, res, redirectCount = 0, clie
       res.end();
     }
   };
-  const requestHeaders = getProxyHeadersForHost(parsed.hostname);
+  const requestHeaders = getProxyHeadersForHost(`${parsed.hostname}${parsed.pathname}`);
   if (clientRange) requestHeaders.Range = clientRange;
 
   const req = client.get(parsed, {
