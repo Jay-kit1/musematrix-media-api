@@ -14,7 +14,8 @@ const host = process.env.HOST || "127.0.0.1";
 const maxJsonBodySize = 1024 * 32;
 const maxMetadataBytes = 1024 * 256;
 const maxRemoteJsonBytes = 1024 * 1024 * 2;
-const maxDownloadBytes = 1024 * 1024 * 250;
+const defaultMaxDownloadBytes = 1024 * 1024 * 512;
+const maxDownloadBytes = resolveDownloadLimit(process.env.MAX_DOWNLOAD_BYTES);
 const extractorTimeoutMs = Number(process.env.EXTRACTOR_TIMEOUT_MS || 45000);
 const downloadTimeoutMs = Number(process.env.DOWNLOAD_TIMEOUT_MS || 30000);
 const parseCacheTtlMs = Number(process.env.PARSE_CACHE_TTL_MS || 90000);
@@ -25,6 +26,17 @@ const browserUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleW
 let runtimeCookiePath = "";
 const parseCache = new Map();
 const parseInFlight = new Map();
+
+function resolveDownloadLimit(rawValue) {
+  const parsed = Number(rawValue);
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.floor(parsed)
+    : defaultMaxDownloadBytes;
+}
+
+function exceedsDownloadLimit(byteCount, limit = maxDownloadBytes) {
+  return Number(byteCount) > limit;
+}
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -1233,7 +1245,7 @@ async function proxyRemoteFile(targetUrl, filename, res, redirectCount = 0) {
     }
 
     const contentLength = Number(remoteRes.headers["content-length"] || 0);
-    if (contentLength > maxDownloadBytes) {
+    if (exceedsDownloadLimit(contentLength)) {
       remoteRes.resume();
       finishWithError(413, "目标资源过大，已停止代理。");
       return;
@@ -1259,7 +1271,7 @@ async function proxyRemoteFile(targetUrl, filename, res, redirectCount = 0) {
     remoteRes.on("data", (chunk) => {
       if (completed) return;
       streamed += chunk.length;
-      if (streamed > maxDownloadBytes) {
+      if (exceedsDownloadLimit(streamed)) {
         remoteRes.destroy();
         finishWithError(413, "目标资源过大，已停止代理。");
         return;
@@ -1772,6 +1784,8 @@ module.exports = {
   getDouyinShareCandidates,
   buildSnapAnyHeaders,
   buildSnapAnyResult,
+  resolveDownloadLimit,
+  exceedsDownloadLimit,
   extractBilibiliId,
   extractDouyinAwemeId,
   buildDouyinMusicItem,
