@@ -31,6 +31,7 @@ http://localhost:3000
 
 ```bash
 npm run audit
+npm test
 ```
 
 ## 线上部署
@@ -61,3 +62,15 @@ PARSE_CACHE_TTL_MS=90000
   window.MUSEMATRIX_API_BASE = "https://你的后端域名";
 </script>
 ```
+
+## 本地记录与媒体有效期
+
+浏览器仅保留最近 6 张卡片；重要笔记请导出 Markdown。存储不可用时，页面仍能工作，但会明确提示记录仅在本次页面有效。重新打开超过 90 秒的历史卡片会重新提取媒体；“重新提取”按钮会绕过解析缓存。保存按钮的短时防重复机制只代表请求已发出，不能确认浏览器下载已完成。
+
+## 网关与发布
+
+`netlify/functions/` 和 `tests/functions.test.mjs` 是 Netlify 网关的版本化源码。部署副本在 `../../musematrix-netlify/`：同步 `public/{index.html,app.js,styles.css}` 到其 `musematrix/`，同步 functions 与 tests，并保留副本自身的路径配置。不要同步 ZIP、虚拟环境或用户的 Sites 项目。
+
+Netlify `/api/download` 只返回 302 到 Render；大媒体不经过 Function 响应体。Render 使用带背压的流式管道，保留 Range、If-Range、ETag 和 416 语义；默认大小上限为 2 GiB。公网验收需检查实际 302 → 206、Content-Range、字节数和 MP4 文件头，不能只检查健康接口。
+
+普通网页仅由带 DNS 校验的元数据读取器处理，不交给 yt-dlp 的通用提取器。已识别平台仍依赖平台专用提取器及外部服务，其登录、地区和限流约束无法由本项目消除。内存解析缓存最多 100 条，同时执行的不同解析请求最多 4 个；相同链接复用在途请求。

@@ -2393,28 +2393,23 @@ body.dark .secondary-button {
 
 @media (max-width: 420px) {
   .signal-rail {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .signal-rail span {
-    flex-direction: row;
-    justify-content: space-between;
+    flex-direction: column;
+    justify-content: center;
   }
 
   .signal-rail span + span {
-    border-top: 1px solid var(--line);
-    border-left: 0;
+    border-left: 1px solid var(--line);
   }
 
   .input-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  #mediaUrl,
-  .paste-button,
-  .primary-button {
-    grid-column: 1;
-  }
+  #mediaUrl { grid-column: 1 / -1; }
 
   .resource-title-row,
   .history-card-header {
@@ -2445,4 +2440,18 @@ body.dark .secondary-button {
     transform: none !important;
     filter: none !important;
   }
+}
+
+/* Keep editable cards steady and long resource names readable. */
+.inspiration-card:hover { transform: none; }
+.result-head > div, .download-item > div, .history-card-title { min-width: 0; overflow-wrap: anywhere; }
+.resource-title-row { flex-wrap: wrap; }
+#parser, #history, #labs { scroll-margin-top: 90px; }
+.motion-ready .reveal-on-scroll:focus-within { opacity: 1; transform: none; filter: none; }
+@media (max-width: 768px) {
+  #mediaUrl, #cardNote, #cardTags, #exportTextarea { font-size: 16px; }
+  .item-actions button, .history-card-actions button, #themeToggle, .palette-chip { min-height: 44px; }
+  .hero h1 { font-size: clamp(26px, 7vw, 34px); }
+  .primary-button, .paste-button { white-space: nowrap; font-size: 14px; }
+  .resource-status { white-space: normal; }
 }

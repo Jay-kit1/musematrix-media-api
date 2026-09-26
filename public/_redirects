@@ -1,1 +1,4 @@
-/* /index.html 200
+/api/parse /.netlify/functions/parse 200!
+/api/health /.netlify/functions/health 200!
+/api/download /.netlify/functions/download 200!
+/musematrix/* /:splat 200

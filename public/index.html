@@ -9,12 +9,12 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="MuseMatrix">
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Cpath d='M18 43V21h7l7 10 7-10h7v22h-7V32l-7 10-7-10v11z' fill='white'/%3E%3C/svg%3E">
-    <link rel="stylesheet" href="./styles.css?v=20260829-download-singleflight">
+    <link rel="stylesheet" href="./styles.css?v=20260926-reliability">
   </head>
   <body>
     <a class="skip-link" href="#parser">跳到链接输入</a>
     <!-- Interactive Background Particles -->
-    <canvas id="matrixParticles"></canvas>
+    <canvas id="matrixParticles" aria-hidden="true"></canvas>
     <div class="cursor-glow" id="cursorGlow" aria-hidden="true"></div>
 
     <!-- Spiral Top Tech Connector Decoration -->
@@ -45,13 +45,13 @@
 
       <nav class="platform-nav" aria-label="主导航">
         <a href="#parser">整理链接</a>
-        <a href="#boardPreview">灵感板</a>
+        <a href="#history">灵感板</a>
         <a href="#platforms">可识别来源</a>
         <a href="#labs">导出</a>
       </nav>
 
       <div class="header-actions">
-        <span class="studio-status" id="apiStatus">API CHECKING</span>
+        <span class="studio-status" id="apiStatus">连接中</span>
         <button class="ghost-button" type="button" id="themeToggle">深色</button>
       </div>
     </header>
@@ -60,20 +60,20 @@
       <section class="hero">
         <div class="hero-inner">
           <div class="studio-tagline reveal-on-scroll">
-            <span class="notice-badge">MUSE COGNITION v1.2</span>
-            <span class="notice-text">把散落的链接转化为多维灵感矩阵</span>
+            <span class="notice-badge">INSPIRATION STUDIO</span>
+            <span class="notice-text">收集素材，留住想法</span>
           </div>
 
           <h1 class="reveal-on-scroll">把素材链接整理成可复用的灵感卡片</h1>
-          <p class="subtitle reveal-on-scroll">粘贴公开视频、图片或网页链接，MuseMatrix 会识别来源、提取可用媒体、保存笔记和标签；后端不可用时自动降级为静态灵感卡片。</p>
+          <p class="subtitle reveal-on-scroll">粘贴公开视频、图片或网页链接，MuseMatrix 会识别来源、提取可用媒体、保存笔记和标签；暂未取得媒体时，仍可记录笔记与原链接。</p>
 
-          <div class="signal-rail reveal-on-scroll" aria-label="服务状态">
-            <span><strong id="healthRevision">--</strong>后端版本</span>
-            <span><strong id="healthExtractor">--</strong>提取器</span>
-            <span><strong>Local</strong>本地历史</span>
+          <div class="signal-rail reveal-on-scroll" aria-label="工作台功能">
+            <span><strong>公开链接</strong>识别来源</span>
+            <span><strong>笔记与标签</strong>记录想法</span>
+            <span><strong>Markdown</strong>随时导出</span>
           </div>
 
-          <form class="parser reveal-on-scroll" id="parser">
+          <form class="parser reveal-on-scroll" id="parser" tabindex="-1">
             <div class="cyber-corner top-left"></div>
             <div class="cyber-corner top-right"></div>
             <div class="cyber-corner bottom-left"></div>
@@ -87,7 +87,7 @@
             <label class="sr-only" for="mediaUrl">灵感节点 URL</label>
             <div class="input-row">
               <span class="input-prefix" aria-hidden="true">URL</span>
-              <input id="mediaUrl" name="url" type="text" placeholder="粘贴视频、图片、网页链接或分享文案" autocomplete="off" required>
+              <input id="mediaUrl" name="url" type="text" placeholder="粘贴视频、图片、网页链接或分享文案" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="4096" enterkeyhint="go" required>
               <button class="paste-button" type="button" id="pasteButton">粘贴链接</button>
               <button class="primary-button" type="submit">生成素材卡片</button>
             </div>
@@ -190,7 +190,7 @@
         <div class="product-copy">
           <p class="eyebrow">[ PIPELINE LOGIC ]</p>
           <h2>三步构建你的认知灵感矩阵</h2>
-          <p>无需繁琐的本地文件整理与混乱的目录管理。通过将链接卡片化，MuseMatrix 帮你专注记录“这个素材为什么吸引我”以及“我可以怎么使用它”。页面本身不依赖前端框架，加载更轻，部署也更稳。</p>
+          <p>无需繁琐的本地文件整理与混乱的目录管理。通过将链接卡片化，MuseMatrix 帮你专注记录“这个素材为什么吸引我”以及“我可以怎么使用它”。重要素材的用途和参考细节，都可以留在卡片里。</p>
           <div class="store-row">
             <span>1. 链接接入</span>
             <span>2. 矩阵提取</span>
@@ -284,12 +284,12 @@
           <div class="cyber-corner top-right"></div>
           <span class="feature-icon">03</span>
           <h3>本地记忆矩阵</h3>
-          <p>为节点撰写创意批注并打上矩阵标签。所有关联想法将动态记录于本地存储，永不流失。</p>
+          <p>为节点撰写创意批注并打上矩阵标签。当前浏览器保留最近 6 张卡片。重要想法请导出备份，清理浏览器数据会删除本地记录。</p>
         </article>
       </section>
 
       <!-- Rebranded History Section -->
-      <section class="history-section reveal-on-scroll">
+      <section class="history-section reveal-on-scroll" id="history">
         <div>
           <p class="eyebrow">[ STORAGE REGISTRY ]</p>
           <h2>我的灵感矩阵看板</h2>
@@ -318,7 +318,7 @@
             </div>
             <div class="lab-card">
               <h3>矩阵统计分析</h3>
-              <p>实时分析已记录的标签分布和平台占比，提供视听素材的使用分布概览。</p>
+              <p>查看当前浏览器保存的卡片数量与去重后的标签总数。</p>
               <div class="mock-stats" id="statsPreview">
                 <span class="stat-badge">标签共计: <b id="statTags">0</b> 个</span>
                 <span class="stat-badge">收集节点: <b id="statCards">0</b> 个</span>
@@ -387,6 +387,6 @@
       </div>
     </footer>
 
-    <script src="./app.js?v=20260829-download-singleflight"></script>
+    <script src="./app.js?v=20260926-reliability"></script>
   </body>
 </html>

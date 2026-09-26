@@ -22,6 +22,36 @@ let backendDownloadAvailable = true;
 let healthRetryTimer = 0;
 const activeDownloadKeys = new Set();
 const downloadLockMs = 8000;
+const mediaFreshnessMs = 90000;
+let flushPendingNotes = () => {};
+let storagePersistent = true;
+const memoryStorage = new Map();
+
+function readStorage(key) {
+  if (memoryStorage.has(key)) return memoryStorage.get(key);
+  try { return localStorage.getItem(key); } catch { storagePersistent = false; return null; }
+}
+
+function writeStorage(key, value) {
+  memoryStorage.set(key, value);
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+    memoryStorage.delete(key);
+    return true;
+  } catch { storagePersistent = false; return false; }
+}
+
+function safeHttpUrl(value) {
+  try {
+    const url = new URL(value);
+    return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password ? url.href : "";
+  } catch { return ""; }
+}
+
+function scrollToPanel(panel) {
+  panel.scrollIntoView({ behavior: reduceMotionQuery.matches ? "auto" : "smooth", block: "nearest" });
+}
 const apiBase = String(window.MUSEMATRIX_API_BASE || "").replace(/\/+$/, "");
 
 function apiUrl(path) {
@@ -42,13 +72,16 @@ function setApiStatus(state, label) {
 function scheduleHealthRetry(attempt) {
   window.clearTimeout(healthRetryTimer);
   const delays = [3000, 6000, 12000, 24000, 30000];
-  if (attempt >= delays.length) return;
+  if (attempt >= delays.length) {
+    setApiStatus("offline", "连接暂不可用");
+    return;
+  }
   healthRetryTimer = window.setTimeout(() => checkApiHealth(attempt + 1), delays[attempt]);
 }
 
 async function checkApiHealth(attempt = 0) {
   window.clearTimeout(healthRetryTimer);
-  setApiStatus("checking", "API CHECKING");
+  setApiStatus("checking", "连接中");
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), 8000);
   try {
@@ -57,19 +90,19 @@ async function checkApiHealth(attempt = 0) {
       signal: controller.signal
     });
     const data = await response.json();
-    if (data.status === "ok") {
+    if (response.ok && data.status === "ok") {
       backendDownloadAvailable = true;
-      setApiStatus("online", "API ONLINE");
+      setApiStatus("online", "服务就绪");
       if (healthRevision) healthRevision.textContent = compactRevision(data.revision);
       if (healthExtractor) healthExtractor.textContent = data.extractor || "ready";
       return;
     }
-    setApiStatus("checking", "API WAKING");
+    setApiStatus("checking", "服务唤醒中");
     if (healthRevision) healthRevision.textContent = "waking";
     if (healthExtractor) healthExtractor.textContent = data.extractor || "starting";
     scheduleHealthRetry(attempt);
   } catch {
-    setApiStatus("checking", "API WAKING");
+    setApiStatus("checking", "服务唤醒中");
     if (healthRevision) healthRevision.textContent = "waking";
     if (healthExtractor) healthExtractor.textContent = "retrying";
     scheduleHealthRetry(attempt);
@@ -116,7 +149,7 @@ function escapeHtml(value) {
 
 function extractUrl(value) {
   const match = String(value || "").match(/https?:\/\/[^\s"'<>，。]+/i);
-  return match ? match[0].replace(/[),.，。]+$/g, "") : "";
+  return match ? safeHttpUrl(match[0].replace(/[),.，。；;！!？?]+$/g, "")) : "";
 }
 
 function classifyPlatform(url) {
@@ -127,14 +160,15 @@ function classifyPlatform(url) {
     return "未知平台";
   }
 
-  if (host.includes("douyin") || host.includes("tiktok")) return "抖音 / TikTok";
-  if (host.includes("youtube") || host.includes("youtu.be")) return "YouTube";
-  if (host.includes("bilibili") || host.includes("b23.tv")) return "哔哩哔哩";
-  if (host.includes("twitter") || host.includes("x.com")) return "X / Twitter";
-  if (host.includes("pinterest")) return "Pinterest";
-  if (host.includes("facebook") || host.includes("fb.watch")) return "Facebook";
-  if (host.includes("instagram")) return "Instagram";
-  if (host.includes("reddit")) return "Reddit";
+  const matches = (...domains) => domains.some(domain => host === domain || host.endsWith(`.${domain}`));
+  if (matches("douyin.com", "iesdouyin.com", "amemv.com", "tiktok.com")) return "抖音 / TikTok";
+  if (matches("youtube.com", "youtu.be")) return "YouTube";
+  if (matches("bilibili.com", "b23.tv")) return "哔哩哔哩";
+  if (matches("twitter.com", "x.com")) return "X / Twitter";
+  if (matches("pinterest.com", "pin.it")) return "Pinterest";
+  if (matches("facebook.com", "fb.watch")) return "Facebook";
+  if (matches("instagram.com")) return "Instagram";
+  if (matches("reddit.com", "redd.it")) return "Reddit";
   if (directMediaPattern.test(url)) return "直接媒体链接";
   return "通用网页";
 }
@@ -209,7 +243,7 @@ function staticParse(inputValue, apiMessage = "") {
   const platformNeedsBackend = !isDirect && platformName !== "通用网页";
   const title = isDirect ? `${getUrlName(url)} · 已识别直接媒体` : `${platformName} · 已建立灵感卡片`;
   const note = platformNeedsBackend
-    ? "上线静态版已完成链接识别、记录、复制和导出。要像专业解析站一样拿到真实 MP4/MP3，需要接入后端解析服务；当前不会让页面报错或打不开。"
+    ? "暂未取得平台媒体，已保留原链接。你仍可记录笔记，或稍后重新提取。"
     : "这个链接可在纯前端模式下直接保存、打开、记录笔记和导出。";
 
   return {
@@ -218,6 +252,7 @@ function staticParse(inputValue, apiMessage = "") {
     platform: { name: platformName },
     note,
     items: buildStaticItems(url, platformName),
+    success: false,
     sourceDetail: {
       extractorHint: apiMessage ? `后端解析暂未可用：${apiMessage}` : note,
       mode: "static"
@@ -225,7 +260,7 @@ function staticParse(inputValue, apiMessage = "") {
   };
 }
 
-async function parseWithOptionalBackend(rawValue) {
+async function parseWithOptionalBackend(rawValue, refresh = false) {
   const url = extractUrl(rawValue);
   if (!url) throw new Error("没有识别到有效链接，请粘贴包含 http 或 https 的地址。");
 
@@ -236,7 +271,7 @@ async function parseWithOptionalBackend(rawValue) {
     const response = await fetch(apiUrl("/api/parse"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url, refresh }),
       signal: controller.signal
     });
     const data = await response.json();
@@ -259,7 +294,13 @@ window.MuseMatrix = {
 
 function getHistory() {
   try {
-    return JSON.parse(localStorage.getItem(historyKey) || "[]");
+    const value = JSON.parse(readStorage(historyKey) || "[]");
+    if (!Array.isArray(value)) return [];
+    return value.filter(item => item && safeHttpUrl(item.url) && typeof item.title === "string")
+      .map(item => ({ ...item, platform: String(item.platform || "通用网页"),
+        note: typeof item.note === "string" ? item.note : "",
+        tags: Array.isArray(item.tags) ? item.tags.filter(tag => typeof tag === "string") : [],
+        items: Array.isArray(item.items) ? item.items.filter(resource => resource && safeHttpUrl(resource.url)) : [] }));
   } catch {
     return [];
   }
@@ -269,7 +310,7 @@ function saveHistory(entry) {
   const history = getHistory();
   const filtered = history.filter((item) => item.url !== entry.url);
   const next = [entry, ...filtered].slice(0, 6);
-  localStorage.setItem(historyKey, JSON.stringify(next));
+  writeStorage(historyKey, JSON.stringify(next));
   renderHistory();
   updateStats();
 }
@@ -283,7 +324,7 @@ function updateHistoryNotesAndTags(url, note, tagsStr) {
       .split(/[,，;；\s]+/)
       .map(t => t.trim().replace(/^#/, ''))
       .filter(Boolean);
-    localStorage.setItem(historyKey, JSON.stringify(history));
+    writeStorage(historyKey, JSON.stringify(history));
     renderHistory();
     updateStats();
   }
@@ -317,7 +358,7 @@ function renderHistory() {
           </div>
           <span class="history-date">${new Date(item.timestamp || Date.now()).toLocaleDateString('zh-CN')}</span>
         </div>
-        <h4 class="history-card-title">${escapeHtml(item.title.replace(/已识别/, "已提取"))}</h4>
+        <h4 class="history-card-title">${escapeHtml(item.title)}</h4>
         ${notePreview}
         ${tagsHtml}
         <div class="history-card-actions">
@@ -332,11 +373,11 @@ function renderHistory() {
 async function copyToClipboard(text, button) {
   try {
     await navigator.clipboard.writeText(text);
-    const originalText = button.textContent;
+    const originalMarkup = button.innerHTML;
     button.textContent = "已复制";
     button.classList.add("copied-active");
     setTimeout(() => {
-      button.textContent = originalText;
+      button.innerHTML = originalMarkup;
       button.classList.remove("copied-active");
     }, 1500);
   } catch {
@@ -345,7 +386,7 @@ async function copyToClipboard(text, button) {
 }
 
 function downloadTrack(url, label, ext = "", button = null) {
-  const downloadKey = String(url || "");
+  const downloadKey = safeHttpUrl(url);
   if (!downloadKey || activeDownloadKeys.has(downloadKey)) return false;
   activeDownloadKeys.add(downloadKey);
 
@@ -353,7 +394,7 @@ function downloadTrack(url, label, ext = "", button = null) {
   if (button) {
     button.disabled = true;
     button.setAttribute("aria-busy", "true");
-    button.textContent = "下载已开始";
+    button.textContent = "已请求保存";
   }
 
   const a = document.createElement("a");
@@ -389,20 +430,21 @@ function downloadTrack(url, label, ext = "", button = null) {
 }
 
 function isDownloadableItem(item) {
-  return item && item.url && ["视频", "音频", "图片", "video", "audio", "image"].includes(item.type);
+  return item && safeHttpUrl(item.url) && ["视频", "音频", "图片", "video", "audio", "image"].includes(item.type);
 }
 
 function renderResult(data) {
+  flushPendingNotes();
   resultPanel.hidden = false;
   const iconSvg = platformSvgs[data.platform.name] || platformSvgs["通用网页"];
   
   // Prepare title and note
-  const isSuccessfulExtraction = data.success !== false;
-  const displayTitle = isSuccessfulExtraction ? data.title.replace(/已识别/, "已提取") : data.title;
+  const displayTitle = data.title;
   const displayNote = data.note || data.sourceDetail?.extractorHint || "";
   const items = Array.isArray(data.items) ? data.items : [];
   const extractorHint = data.sourceDetail?.extractorHint || "";
   const downloadableItems = items.filter(isDownloadableItem);
+  const mediaStatus = data.sourceDetail?.mode === "static" ? "直链待验证" : `${downloadableItems.length} 项可保存`;
 
   // Load saved tags & notes if this url is cached
   const history = getHistory();
@@ -414,7 +456,7 @@ function renderResult(data) {
   const palette = platformPalettes[data.platform.name] || platformPalettes["通用网页"];
   const paletteHtml = `
     <div class="palette-container">
-      <h4 class="palette-title">🎨 全息色彩矩阵分析 (PALETTE MATRIX)</h4>
+      <h4 class="palette-title">来源参考配色 · 非素材取色</h4>
       <div class="palette-grid-row">
         ${palette.map(color => `
           <button class="palette-chip" type="button" style="background-color: ${color};" data-action="copy-color" data-value="${color}" title="复制 ${color}">
@@ -441,7 +483,7 @@ function renderResult(data) {
           <h2>${escapeHtml(displayTitle)}</h2>
           <p class="source-info">
             来源: <strong>${escapeHtml(data.platform.name)}</strong> · 
-            <a class="original-link-btn" href="${escapeHtml(data.url)}" target="_blank" rel="noopener">打开原链接 ↗</a>
+            <a class="original-link-btn" href="${escapeHtml(safeHttpUrl(data.url))}" target="_blank" rel="noopener">打开原链接 ↗</a>
           </p>
         </div>
       </div>
@@ -451,7 +493,8 @@ function renderResult(data) {
       <div class="resource-block">
         <div class="resource-title-row">
           <h3 class="resource-title">可用媒体与来源</h3>
-          <span class="resource-status ${downloadableItems.length ? "ready" : "fallback"}">${downloadableItems.length ? `${downloadableItems.length} 项可保存` : "已保留原链接"}</span>
+          <button class="ghost-button" type="button" data-action="refresh" data-url="${escapeHtml(data.url)}">重新提取</button>
+          <span class="resource-status ${downloadableItems.length ? "ready" : "fallback"}">${downloadableItems.length ? mediaStatus : "已保留原链接"}</span>
         </div>
         <div class="download-options">
           ${downloadableItems.length ? downloadableItems.map((item) => `
@@ -473,7 +516,7 @@ function renderResult(data) {
       ${paletteHtml}
 
       <div class="card-notes-section">
-        <label for="cardNote">灵感备忘笔记 <span class="save-state" id="saveState" role="status">已同步到本地</span></label>
+        <label for="cardNote">灵感备忘笔记 <span class="save-state" id="saveState" role="status">${storagePersistent ? "已保存到本地" : "仅本次页面有效，请导出备份"}</span></label>
         <textarea id="cardNote" placeholder="在此写下你对该素材的想法，如: 配色极其舒服、转场过渡非常巧妙，打算用在下期设计中。">${escapeHtml(savedNote)}</textarea>
       </div>
 
@@ -483,7 +526,7 @@ function renderResult(data) {
       </div>
 
       <div class="card-footer-info">
-        <span>此素材节点已保存至当前浏览器。本页面可静态上线，真实平台音视频提取需要后端服务配合。</span>
+        <span>仅在当前浏览器保留最近 6 张卡片；清理浏览器数据会删除记录。重要笔记请及时导出。</span>
       </div>
     </div>
   `;
@@ -493,14 +536,20 @@ function renderResult(data) {
   const tagsInput = resultPanel.querySelector("#cardTags");
   const saveState = resultPanel.querySelector("#saveState");
   let saveTimer;
+  let notesDirty = false;
+  flushPendingNotes = () => {
+    window.clearTimeout(saveTimer);
+    if (!notesDirty) return;
+    notesDirty = false;
+    updateHistoryNotesAndTags(data.url, noteArea.value, tagsInput.value);
+    if (saveState) saveState.textContent = storagePersistent ? "已保存到本地" : "仅本次页面有效，请导出备份";
+  };
   
   const autoSave = () => {
+    notesDirty = true;
     if (saveState) saveState.textContent = "正在保存…";
     window.clearTimeout(saveTimer);
-    saveTimer = window.setTimeout(() => {
-      updateHistoryNotesAndTags(data.url, noteArea.value, tagsInput.value);
-      if (saveState) saveState.textContent = "已同步到本地";
-    }, 260);
+    saveTimer = window.setTimeout(flushPendingNotes, 260);
   };
   
   noteArea.addEventListener("input", autoSave);
@@ -525,6 +574,13 @@ resultPanel.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-action]");
   if (!button) return;
   const action = button.dataset.action;
+  if (action === "refresh") {
+    if (submitButton.disabled) return;
+    input.value = button.dataset.url;
+    form.dataset.refresh = "true";
+    form.requestSubmit();
+    return;
+  }
   if (action === "copy-color") {
     copyToClipboard(button.dataset.value || "", button);
     return;
@@ -546,6 +602,10 @@ resultPanel.addEventListener("click", (event) => {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (submitButton.disabled) return;
+  flushPendingNotes();
+  const refresh = form.dataset.refresh === "true";
+  delete form.dataset.refresh;
   const url = input.value.trim();
   if (!url) return;
 
@@ -583,11 +643,11 @@ form.addEventListener("submit", async (event) => {
   }, 2400);
 
   if (window.innerWidth <= 768) {
-    resultPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    scrollToPanel(resultPanel);
   }
 
   try {
-    const data = await parseWithOptionalBackend(url);
+    const data = await parseWithOptionalBackend(url, refresh);
     
     const history = getHistory();
     const cached = history.find(item => item.url === data.url);
@@ -599,6 +659,8 @@ form.addEventListener("submit", async (event) => {
       note: cached ? cached.note : "",
       tags: cached ? cached.tags : [],
       items: data.items,
+      success: data.success,
+      sourceDetail: data.sourceDetail,
       timestamp: Date.now()
     };
 
@@ -607,7 +669,7 @@ form.addEventListener("submit", async (event) => {
       url: newEntry.url,
       platform: { name: newEntry.platform },
       title: newEntry.title,
-      note: newEntry.note,
+      note: data.note,
       items: newEntry.items,
       success: data.success,
       sourceDetail: data.sourceDetail
@@ -642,6 +704,8 @@ historyList.addEventListener("click", (event) => {
     copyToClipboard(actionButton.dataset.url || "", actionButton);
     return;
   }
+  if (submitButton.disabled) return;
+  flushPendingNotes();
   const card = event.target.closest(".history-card");
   if (!card) return;
 
@@ -650,19 +714,28 @@ historyList.addEventListener("click", (event) => {
   const match = items.find(item => item.url === url);
   if (match) {
     input.value = url;
+    if (!match.timestamp || Date.now() - match.timestamp >= mediaFreshnessMs) {
+      form.requestSubmit();
+      return;
+    }
     renderResult({
       url: match.url,
       platform: { name: match.platform },
       title: match.title,
       note: "已从本地灵感历史调取该素材。",
-      items: match.items
+      items: match.items,
+      success: match.success,
+      sourceDetail: match.sourceDetail
     });
-    resultPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    scrollToPanel(resultPanel);
   }
 });
 
 clearHistoryButton.addEventListener("click", () => {
-  localStorage.removeItem(historyKey);
+  flushPendingNotes();
+  flushPendingNotes = () => {};
+  resultPanel.hidden = true;
+  writeStorage(historyKey, null);
   renderHistory();
   updateStats();
 });
@@ -671,7 +744,7 @@ clearHistoryButton.addEventListener("click", () => {
 const colorSchemeQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
 function applySystemTheme(e) {
-  if (!localStorage.getItem("theme")) {
+  if (!readStorage("theme")) {
     if (e.matches) {
       document.body.classList.add("dark");
       themeToggle.textContent = "浅色";
@@ -684,7 +757,7 @@ function applySystemTheme(e) {
 colorSchemeQuery.addEventListener("change", applySystemTheme);
 
 // Setup Initial Theme
-const storedTheme = localStorage.getItem("theme");
+const storedTheme = readStorage("theme");
 if (storedTheme === "dark" || (!storedTheme && colorSchemeQuery.matches)) {
   document.body.classList.add("dark");
   themeToggle.textContent = "浅色";
@@ -699,12 +772,12 @@ themeToggle.addEventListener("click", () => {
     document.body.classList.remove("dark");
     document.body.classList.add("light");
     themeToggle.textContent = "深色";
-    localStorage.setItem("theme", "light");
+    writeStorage("theme", "light");
   } else {
     document.body.classList.remove("light");
     document.body.classList.add("dark");
     themeToggle.textContent = "浅色";
-    localStorage.setItem("theme", "dark");
+    writeStorage("theme", "dark");
   }
 });
 
@@ -731,6 +804,7 @@ function updateStats() {
 
 if (exportBtn) {
   exportBtn.addEventListener("click", () => {
+    flushPendingNotes();
     const history = getHistory();
     if (!history.length) {
       alert("当前矩阵中暂无灵感记录。");
@@ -750,7 +824,7 @@ if (exportBtn) {
     
     exportTextarea.value = md;
     exportPreviewBox.hidden = false;
-    exportPreviewBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    scrollToPanel(exportPreviewBox);
   });
 }
 
@@ -760,6 +834,7 @@ if (copyExportBtn) {
   });
 }
 
+window.addEventListener("pagehide", () => flushPendingNotes());
 renderHistory();
 updateStats();
 checkApiHealth();
@@ -788,7 +863,7 @@ document.querySelectorAll(".platform-card, .step-card, .history-card, .labs-cont
   .forEach((card) => card.classList.add("spotlight-card"));
 document.addEventListener("pointermove", (event) => {
   const card = event.target.closest(".spotlight-card");
-  if (!card) return;
+  if (!card || reduceMotionQuery.matches || event.pointerType === "touch") return;
   const rect = card.getBoundingClientRect();
   card.style.setProperty("--spot-x", `${event.clientX - rect.left}px`);
   card.style.setProperty("--spot-y", `${event.clientY - rect.top}px`);
@@ -796,6 +871,7 @@ document.addEventListener("pointermove", (event) => {
 
 if (cursorGlow && !reduceMotionQuery.matches && window.matchMedia("(pointer: fine)").matches) {
   window.addEventListener("pointermove", (event) => {
+    if (reduceMotionQuery.matches) { cursorGlow.style.opacity = "0"; return; }
     cursorGlow.style.left = `${event.clientX}px`;
     cursorGlow.style.top = `${event.clientY}px`;
     cursorGlow.style.opacity = "1";
@@ -1170,13 +1246,12 @@ if (canvas && !reduceMotionQuery.matches) {
     animationFrameId = requestAnimationFrame(animate);
   }
 
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden) {
-      cancelAnimationFrame(animationFrameId);
-    } else {
-      animationFrameId = requestAnimationFrame(animate);
-    }
-  });
+  const syncAnimation = () => {
+    cancelAnimationFrame(animationFrameId);
+    if (!document.hidden && !reduceMotionQuery.matches) animationFrameId = requestAnimationFrame(animate);
+  };
+  document.addEventListener("visibilitychange", syncAnimation);
+  reduceMotionQuery.addEventListener("change", syncAnimation);
 
   animationFrameId = requestAnimationFrame(animate);
 }

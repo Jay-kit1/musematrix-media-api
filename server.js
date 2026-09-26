@@ -5,6 +5,7 @@ const path = require("path");
 const dns = require("dns").promises;
 const net = require("net");
 const crypto = require("crypto");
+const { Transform, pipeline } = require("stream");
 const { execFile } = require("child_process");
 
 
@@ -51,7 +52,13 @@ function shouldRedirectLargeDownload(byteCount, limit = maxProxyDownloadBytes) {
 }
 
 function isValidRangeHeader(value) {
-  return !value || /^bytes=\d*-\d*$/i.test(value);
+  if (!value) return true;
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(value);
+  if (!match || (!match[1] && !match[2])) return false;
+  const start = match[1] ? Number(match[1]) : null;
+  const end = match[2] ? Number(match[2]) : null;
+  if ([start, end].some(n => n !== null && !Number.isSafeInteger(n))) return false;
+  return start === null ? end > 0 : end === null || end >= start;
 }
 
 function getRemoteTotalBytes(headers = {}) {
@@ -111,8 +118,8 @@ function applyCors(req, res) {
     res.setHeader("Access-Control-Allow-Origin", allowOrigin);
   }
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  res.setHeader("Access-Control-Expose-Headers", "Content-Disposition,Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type,Range,If-Range");
+  res.setHeader("Access-Control-Expose-Headers", "Content-Disposition,Content-Type,Content-Range,Accept-Ranges,ETag,Last-Modified");
   res.setHeader("Vary", "Origin");
 }
 
@@ -134,6 +141,7 @@ function parseHttpUrl(rawUrl) {
     throw new Error("仅支持 http 或 https 链接");
   }
 
+  if (parsed.username || parsed.password) throw new TypeError("URL 不允许包含凭据");
   parsed.hash = "";
   return parsed;
 }
@@ -161,13 +169,17 @@ function isPrivateIp(address) {
   }
 
   if (net.isIP(address) === 6) {
-    const normalized = address.toLowerCase().split("%")[0];
+    const normalized = new URL(`http://[${address.split("%")[0]}]/`).hostname.slice(1, -1).toLowerCase();
     const firstHextet = Number.parseInt(normalized.split(":")[0] || "0", 16);
     return (
+      (firstHextet & 0xe000) !== 0x2000 ||
       normalized === "::" ||
       normalized === "::1" ||
       normalized.startsWith("::ffff:") ||
       normalized.startsWith("64:ff9b:") ||
+      normalized.startsWith("2002:") ||
+      normalized.startsWith("2001:0:") ||
+      normalized.startsWith("2001::") ||
       normalized.startsWith("2001:db8:") ||
       (firstHextet & 0xfe00) === 0xfc00 ||
       (firstHextet & 0xffc0) === 0xfe80 ||
@@ -180,7 +192,7 @@ function isPrivateIp(address) {
 }
 
 async function assertPublicUrl(parsed) {
-  const hostname = parsed.hostname.toLowerCase();
+  const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
   if (hostname === "localhost" || hostname.endsWith(".localhost")) {
     throw new Error("不允许代理本机、内网或保留地址");
   }
@@ -528,6 +540,7 @@ function buildYtDlpArgs(cleanUrl) {
     "--ignore-config",
     "--dump-single-json",
     "--no-playlist",
+    "--use-extractors", "default,-generic",
     "--no-warnings",
     "--skip-download",
     "--retries", "1",
@@ -1226,7 +1239,17 @@ async function extractBilibili(cleanUrl, platform, sourceDetail) {
   };
 }
 
-async function proxyRemoteFile(targetUrl, filename, res, redirectCount = 0, clientRange = "") {
+function createDownloadLimiter(limit = maxDownloadBytes) {
+  let received = 0;
+  return new Transform({
+    transform(chunk, _encoding, callback) {
+      received += chunk.length;
+      callback(exceedsDownloadLimit(received, limit) ? new Error("Media size limit exceeded") : null, chunk);
+    }
+  });
+}
+
+async function proxyRemoteFile(targetUrl, filename, res, redirectCount = 0, clientRange = "", ifRange = "") {
   const parsed = parseHttpUrl(targetUrl);
   const resolved = await assertPublicUrl(parsed);
 
@@ -1239,11 +1262,14 @@ async function proxyRemoteFile(targetUrl, filename, res, redirectCount = 0, clie
     if (!res.headersSent) {
       sendText(res, status, message);
     } else {
-      res.end();
+      res.destroy();
     }
   };
   const requestHeaders = getProxyHeadersForHost(`${parsed.hostname}${parsed.pathname}`);
-  if (clientRange) requestHeaders.Range = clientRange;
+  if (clientRange) {
+    requestHeaders.Range = clientRange;
+    if (ifRange) requestHeaders["If-Range"] = ifRange;
+  }
 
   const req = client.get(parsed, {
     timeout: downloadTimeoutMs,
@@ -1253,17 +1279,26 @@ async function proxyRemoteFile(targetUrl, filename, res, redirectCount = 0, clie
     activeRemoteResponse = remoteRes;
     const location = remoteRes.headers.location;
     if ([301, 302, 303, 307, 308].includes(remoteRes.statusCode) && location && redirectCount < 4) {
-      remoteRes.resume();
+      completed = true;
+      remoteRes.destroy();
       try {
-        await proxyRemoteFile(new URL(location, parsed).toString(), filename, res, redirectCount + 1, clientRange);
-      } catch (err) {
-        finishWithError(400, err.message);
+        await proxyRemoteFile(new URL(location, parsed).toString(), filename, res, redirectCount + 1, clientRange, ifRange);
+      } catch {
+        if (!res.headersSent) sendText(res, 400, "资源地址不可访问");
       }
       return;
     }
 
+    if (remoteRes.statusCode === 416) {
+      completed = true;
+      const range = remoteRes.headers["content-range"];
+      if (/^bytes \*\/\d+$/.test(range || "")) res.setHeader("Content-Range", range);
+      remoteRes.destroy();
+      sendText(res, 416, "请求的范围超出资源长度。");
+      return;
+    }
     if (remoteRes.statusCode < 200 || remoteRes.statusCode >= 300) {
-      remoteRes.resume();
+      remoteRes.destroy();
       finishWithError(502, `目标资源响应异常：${remoteRes.statusCode}`);
       return;
     }
@@ -1271,7 +1306,7 @@ async function proxyRemoteFile(targetUrl, filename, res, redirectCount = 0, clie
     const contentLength = Number(remoteRes.headers["content-length"] || 0);
     const totalBytes = getRemoteTotalBytes(remoteRes.headers);
     if (exceedsDownloadLimit(totalBytes)) {
-      remoteRes.resume();
+      remoteRes.destroy();
       finishWithError(413, "目标资源过大，已停止代理。");
       return;
     }
@@ -1281,7 +1316,7 @@ async function proxyRemoteFile(targetUrl, filename, res, redirectCount = 0, clie
       .slice(0, 120) || "resource";
     const contentType = remoteRes.headers["content-type"] || "application/octet-stream";
     if (!/^(video|audio|image)\//i.test(contentType) && !/^application\/(octet-stream|mp4|vnd\.apple\.mpegurl|x-mpegurl)/i.test(contentType)) {
-      remoteRes.resume();
+      remoteRes.destroy();
       finishWithError(415, "目标地址不是可保存的媒体资源。");
       return;
     }
@@ -1297,41 +1332,28 @@ async function proxyRemoteFile(targetUrl, filename, res, redirectCount = 0, clie
       res.end();
       return;
     }
-    let streamed = 0;
-
     const responseHeaders = {
       "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(safeName)}`,
       "Content-Type": contentType,
       "Cache-Control": "no-store",
-      "Accept-Ranges": remoteRes.headers["accept-ranges"] || "bytes"
+      "Accept-Ranges": remoteRes.headers["accept-ranges"] || (remoteRes.statusCode === 206 ? "bytes" : "none")
     };
     if (contentLength) responseHeaders["Content-Length"] = String(contentLength);
     if (remoteRes.headers["content-range"]) {
       responseHeaders["Content-Range"] = remoteRes.headers["content-range"];
     }
+    for (const header of ["etag", "last-modified"]) {
+      if (remoteRes.headers[header]) responseHeaders[header] = remoteRes.headers[header];
+    }
     res.writeHead(remoteRes.statusCode === 206 ? 206 : 200, responseHeaders);
 
-    remoteRes.on("data", (chunk) => {
-      if (completed) return;
-      streamed += chunk.length;
-      if (exceedsDownloadLimit(streamed)) {
-        remoteRes.destroy();
-        finishWithError(413, "目标资源过大，已停止代理。");
-        return;
-      }
-      res.write(chunk);
-    });
-    remoteRes.on("end", () => {
-      if (completed) return;
-      completed = true;
-      res.end();
-    });
-    remoteRes.on("error", (err) => finishWithError(502, `目标资源读取失败：${err.message}`));
+    // pipeline propagates backpressure and aborts incomplete transfers on failure.
+    pipeline(remoteRes, createDownloadLimiter(), res, () => { completed = true; });
   });
 
   req.on("timeout", () => req.destroy(new Error("目标资源请求超时")));
   req.on("error", (err) => {
-    finishWithError(502, `目标资源请求失败：${err.message}`);
+    finishWithError(502, "目标资源连接失败，请重新提取或稍后重试。");
   });
   res.once("close", () => {
     if (completed) return;
@@ -1564,7 +1586,7 @@ async function buildResults(rawUrl) {
   }
 
   const [extractorInfo, pageDetails, tiktokFallback] = await Promise.all([
-    runYtDlp(cleanUrl),
+    platform.name === "通用网页" ? Promise.resolve(null) : runYtDlp(cleanUrl),
     fetchPageDetails(cleanUrl),
     isTikTokLikeUrl(cleanUrl)
       ? extractTikwm(cleanUrl, platform, sourceDetail).catch(() => null)
@@ -1637,7 +1659,7 @@ async function buildResults(rawUrl) {
     sourceDetail: {
       ...sourceDetail,
       extractor: getYtDlpPath() ? "yt-dlp-failed-or-empty" : "not-configured",
-      extractorError: rawExtractorError,
+      ...(exposeErrorDetails ? { extractorError: rawExtractorError } : {}),
       extractorHint: friendlyExtractorError,
       cookieConfigured: Boolean(getCookieFilePath() || process.env.YTDLP_COOKIES_FROM_BROWSER),
       contentType: pageDetails.contentType || "",
@@ -1645,23 +1667,29 @@ async function buildResults(rawUrl) {
       description: pageDetails.description || "",
       thumbnail: pageDetails.thumbnail || "",
       favicon: pageDetails.favicon || "",
-      metadataError: pageDetails.error || ""
+      ...(exposeErrorDetails ? { metadataError: pageDetails.error || "" } : {})
     },
     items: failedItems
   };
 }
 
-async function buildResultsCached(rawUrl) {
+async function buildResultsCached(rawUrl, refresh = false) {
   const cacheKey = parseHttpUrl(rawUrl).toString();
   const now = Date.now();
   const cached = parseCache.get(cacheKey);
-  if (cached && cached.expiresAt > now) {
+  if (!refresh && cached && cached.expiresAt > now) {
     return cached.result;
   }
   if (cached) parseCache.delete(cacheKey);
 
   if (parseInFlight.has(cacheKey)) {
     return parseInFlight.get(cacheKey);
+  }
+
+  if (parseInFlight.size >= 4) {
+    const error = new Error("解析服务繁忙，请稍后重试。");
+    error.statusCode = 503;
+    throw error;
   }
 
   const pending = buildResults(rawUrl)
@@ -1671,6 +1699,7 @@ async function buildResultsCached(rawUrl) {
       );
       if (hasMedia && result.success !== false) {
         parseCache.set(cacheKey, { result, expiresAt: Date.now() + parseCacheTtlMs });
+        if (parseCache.size > 100) parseCache.delete(parseCache.keys().next().value);
       }
       return result;
     })
@@ -1723,9 +1752,9 @@ const server = http.createServer((req, res) => {
       return;
     }
 
-    proxyRemoteFile(targetUrl, filename, res, 0, clientRange).catch((err) => {
+    proxyRemoteFile(targetUrl, filename, res, 0, clientRange, String(req.headers["if-range"] || "")).catch((err) => {
       if (!res.headersSent) {
-        sendText(res, 400, err.message || "资源代理失败");
+        sendText(res, 400, "资源地址无效或不可访问。");
       }
     });
     return;
@@ -1739,12 +1768,13 @@ const server = http.createServer((req, res) => {
       return;
     }
 
+    req.setEncoding("utf8");
     let body = "";
     let bodyTooLarge = false;
     req.on("data", (chunk) => {
       if (bodyTooLarge) return;
       body += chunk;
-      if (body.length > maxJsonBodySize) {
+      if (Buffer.byteLength(body, "utf8") > maxJsonBodySize) {
         bodyTooLarge = true;
         if (!res.headersSent) {
           sendJson(res, 413, { error: "链接请求内容过大，请只提交一个 URL。" });
@@ -1763,13 +1793,13 @@ const server = http.createServer((req, res) => {
           sendJson(res, 400, { error: "请先粘贴一个媒体链接。" });
           return;
         }
-        const result = await buildResultsCached(payload.url);
+        const result = await buildResultsCached(payload.url, payload.refresh === true);
         sendJson(res, 200, result);
       } catch (err) {
         const policyBlocked = /本机、内网或保留地址/.test(String(err && err.message));
-        const invalidUrl = err instanceof TypeError || /URL|http|链接格式/.test(String(err && err.message)) || policyBlocked;
-        sendJson(res, invalidUrl ? 400 : 502, {
-          error: policyBlocked
+        const invalidUrl = err instanceof SyntaxError || err instanceof TypeError || /URL|http|链接格式/.test(String(err && err.message)) || policyBlocked;
+        sendJson(res, invalidUrl ? 400 : err.statusCode === 503 ? 503 : 502, {
+          error: err.statusCode === 503 ? "解析服务繁忙，请稍后重试。" : policyBlocked
             ? "该链接指向本机、内网或保留地址，服务不会访问。"
             : invalidUrl
             ? "链接格式不正确，请粘贴完整的 http/https URL，例如 https://example.com/video.mp4"
@@ -1826,6 +1856,9 @@ if (require.main === module) {
 
 module.exports = {
   parseHttpUrl,
+  createDownloadLimiter,
+  assertPublicUrl,
+  server,
   detectPlatform,
   getMediaKind,
   isPrivateIp,
