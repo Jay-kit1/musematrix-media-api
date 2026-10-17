@@ -160,3 +160,25 @@ test('an initial TikTok save uses an open byte range required by its CDN',async(
  await new Promise(resolve=>backend.server.listen(0,'127.0.0.1',resolve));
  try{const r=await fetch(`http://127.0.0.1:${backend.server.address().port}/api/download?url=${encodeURIComponent('https://v16-notes.tiktokcdn-us.com/a.mp4')}`);assert.equal(r.status,206);assert.equal(captured.Range,'bytes=0-');assert.equal(await r.text(),'0000ftypisom');}finally{https.get=originalGet;dns.promises.lookup=originalLookup;await new Promise(resolve=>backend.server.close(resolve));}
 });
+
+test('merge input reads bounded byte ranges and joins the exact original bytes',async()=>{
+ const originalGet=https.get,originalLookup=dns.promises.lookup;
+ const {mkdtemp,readFile,rm}=await import('node:fs/promises');const {tmpdir}=await import('node:os');const {join}=await import('node:path');
+ const dir=await mkdtemp(join(tmpdir(),'muse-ranges-'));const bytes=Buffer.alloc(4*1024*1024+17,7);const ranges=[];
+ dns.promises.lookup=async()=>[{address:'93.184.216.34',family:4}];
+ https.get=(_url,options,callback)=>{
+  const [start,end]=options.headers.Range.slice(6).split('-').map(Number);ranges.push([start,end]);
+  const last=Math.min(end,bytes.length-1),part=bytes.subarray(start,last+1);const remote=Readable.from([part]);
+  remote.statusCode=206;remote.headers={'content-length':String(part.length),'content-range':`bytes ${start}-${last}/${bytes.length}`,etag:'"same-video"'};
+  const req=new Readable({read(){}});process.nextTick(()=>callback(remote));return req;
+ };
+ try{const output=join(dir,'v.mp4');assert.equal(await backend.downloadTrackToFile('https://upos-hz-mirrorakam.akamaized.net/v.mp4',output,8*1024*1024),bytes.length);assert.deepEqual(ranges,[[0,4194303],[4194304,8388607]]);assert.deepEqual(await readFile(output),bytes);}finally{https.get=originalGet;dns.promises.lookup=originalLookup;await rm(dir,{recursive:true,force:true});}
+});
+
+test('a stalled merge input has a total deadline and releases its stream',async()=>{
+ const originalGet=https.get,originalLookup=dns.promises.lookup;
+ const {mkdtemp,rm}=await import('node:fs/promises');const {tmpdir}=await import('node:os');const {join}=await import('node:path');const dir=await mkdtemp(join(tmpdir(),'muse-stall-'));
+ dns.promises.lookup=async()=>[{address:'93.184.216.34',family:4}];
+ https.get=(_url,_options,callback)=>{const remote=new Readable({read(){}});remote.statusCode=200;remote.headers={'content-length':'12'};const req=new Readable({read(){}});process.nextTick(()=>callback(remote));return req;};
+ try{await assert.rejects(backend.downloadTrackToFile('https://cdn.example/stalled.mp4',join(dir,'v.mp4'),1024,Date.now()+30),/时限/);}finally{https.get=originalGet;dns.promises.lookup=originalLookup;await rm(dir,{recursive:true,force:true});}
+});

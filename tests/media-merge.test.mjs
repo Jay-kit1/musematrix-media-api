@@ -20,7 +20,9 @@ test('actual remux produces an MP4 containing both video and audio, sharing dupl
   let downloads=0;
   const download=async(url,file,limit)=>{downloads++;const src=url.endsWith('v')?v:a;const size=(await fs.stat(src)).size;assert.ok(size<limit);await fs.copyFile(src,file);return size;};
   const url='https://cdn.example/test-'+Date.now();
+  assert.equal(merge.prepareMergedFile(url+'v',url+'a',download).status,'preparing');
   const [one,two]=await Promise.all([merge.mergedFile(url+'v',url+'a',download),merge.mergedFile(url+'v',url+'a',download)]);
+  assert.equal(merge.prepareMergedFile(url+'v',url+'a',download).status,'ready');
   assert.equal(downloads,2);assert.equal(one.path,two.path);
   const args=['-hide_banner','-i',one.path,'-t','0.1','-f','null','-'];
   let stderr='';

@@ -7,7 +7,7 @@ const net = require("net");
 const crypto = require("crypto");
 const { Transform, pipeline } = require("stream");
 const { pipeline: pipelineAsync } = require("stream/promises");
-const { mergedFile } = require("./lib/merge-media.js");
+const { mergedFile, prepareMergedFile } = require("./lib/merge-media.js");
 const { execFile } = require("child_process");
 const { extractPublicPlatform } = require("./lib/public-platforms.js");
 
@@ -1125,25 +1125,56 @@ async function extractBilibili(cleanUrl, platform, sourceDetail, io = {requestUr
   return (await biliModule).extractBilibili(cleanUrl,platform,sourceDetail,io);
 }
 
-async function downloadTrackToFile(targetUrl, filePath, limit, redirectCount = 0) {
+async function readTrackChunk(targetUrl, filePath, limit, offset, expectedTotal, etag, deadlineAt, redirectCount=0) {
   const parsed = parseHttpUrl(targetUrl);
   const resolved = await assertPublicUrl(parsed);
   const client = parsed.protocol === 'https:' ? https : http;
+  const end=Math.min(offset+4*1024*1024-1,limit-1);
+  const headers={...getProxyHeadersForHost(parsed.hostname),Range:`bytes=${offset}-${end}`};
+  if(offset&&etag)headers['If-Range']=etag;
   return new Promise((resolve,reject)=>{
-    const req=client.get(parsed,{headers:getProxyHeadersForHost(parsed.hostname),lookup:createPinnedLookup(resolved),timeout:30000},async remote=>{
+    let remoteResponse;
+    const hardTimer=setTimeout(()=>{
+      const error=new Error('媒体轨道读取超过总时限，请重新提取后重试。');
+      remoteResponse?.destroy(error);req.destroy(error);reject(error);
+    },Math.max(1,deadlineAt-Date.now()));
+    hardTimer.unref();
+    const finish=(error,value)=>{clearTimeout(hardTimer);error?reject(error):resolve(value);};
+    const req=client.get(parsed,{headers,lookup:createPinnedLookup(resolved),timeout:30000},async remote=>{
+      remoteResponse=remote;
       try {
         if ([301,302,303,307,308].includes(remote.statusCode) && remote.headers.location) {
           remote.resume();if(redirectCount>=4)throw new Error('资源重定向过多');
-          resolve(await downloadTrackToFile(new URL(remote.headers.location,parsed).href,filePath,limit,redirectCount+1));return;
+          clearTimeout(hardTimer);
+          const value=await readTrackChunk(new URL(remote.headers.location,parsed).href,filePath,limit,offset,expectedTotal,etag,deadlineAt,redirectCount+1);finish(null,value);return;
         }
-        if(remote.statusCode!==200 || Number(remote.headers['content-length']||0)>limit){remote.destroy();throw new Error('媒体轨道不可访问或超出合并大小限制');}
+        let total=Number(remote.headers['content-length']||0),partial=remote.statusCode===206,expectedBytes=total;
+        if(partial){
+          const range=String(remote.headers['content-range']||'').match(/^bytes (\d+)-(\d+)\/(\d+)$/);
+          if(!range||Number(range[1])!==offset||Number(range[2])>end||Number(range[2])<offset)throw new Error('媒体轨道分段范围无效');
+          total=Number(range[3]);
+          expectedBytes=Number(range[2])+1-offset;
+          if(!Number.isSafeInteger(total)||total<=Number(range[2])||(expectedTotal&&expectedTotal!==total))throw new Error('媒体轨道大小不一致');
+        } else if(remote.statusCode!==200||offset)throw new Error('媒体轨道不可访问（HTTP '+remote.statusCode+'）');
+        if(total>limit)throw new Error('媒体轨道超出合并大小限制');
         let bytes=0;
-        const bounded=new Transform({transform(chunk,encoding,callback){bytes+=chunk.length;callback(bytes>limit?new Error('合并资源过大'):null,chunk)}});
-        await pipelineAsync(remote,bounded,fs.createWriteStream(filePath));resolve(bytes);
-      } catch(e){reject(e);}
+        const bounded=new Transform({transform(chunk,encoding,callback){bytes+=chunk.length;callback(bytes+offset>limit?new Error('合并资源过大'):null,chunk)}});
+        await pipelineAsync(remote,bounded,fs.createWriteStream(filePath,{flags:offset?'a':'w'}));
+        if(!bytes||(expectedBytes&&bytes!==expectedBytes))throw new Error('媒体轨道下载不完整');
+        finish(null,{bytes,total:partial?total:bytes,etag:remote.headers.etag||etag,finalUrl:parsed.href});
+      } catch(e){remote.destroy();finish(e);}
     });
-    req.on('timeout',()=>req.destroy(new Error('媒体轨道读取超时')));req.on('error',reject);
+    req.on('timeout',()=>req.destroy(new Error('媒体轨道读取超时')));req.on('error',e=>finish(e));
   });
+}
+
+async function downloadTrackToFile(targetUrl, filePath, limit, deadlineAt=Date.now()+90000) {
+  let offset=0,total=0,etag='',current=targetUrl;
+  do {
+    const chunk=await readTrackChunk(current,filePath,limit,offset,total,etag,deadlineAt);
+    offset+=chunk.bytes;total=chunk.total;etag=chunk.etag;current=chunk.finalUrl;
+  } while(offset<total);
+  return offset;
 }
 
 function createDownloadLimiter(limit = maxDownloadBytes) {
@@ -1683,6 +1714,15 @@ const server = http.createServer((req, res) => {
 
     const audioUrl = parsedReqUrl.searchParams.get('audio');
     if (audioUrl) {
+      const preparation=parsedReqUrl.searchParams.get('prepare');
+      if(preparation){
+        try {
+          parseHttpUrl(targetUrl);parseHttpUrl(audioUrl);
+          const state=prepareMergedFile(targetUrl,audioUrl,downloadTrackToFile,preparation==='1');
+          sendJson(res,state.status==='failed'?502:state.status==='ready'?200:202,state);
+        } catch {sendJson(res,400,{error:'媒体地址无效。'});}
+        return;
+      }
       // Both source URLs go through the same DNS/redirect checks before local-only remuxing.
       mergedFile(targetUrl,audioUrl,downloadTrackToFile).then(file=>{
         if(res.destroyed)return;
@@ -1803,6 +1843,7 @@ if (require.main === module) {
 module.exports = {
   parseHttpUrl,
   createDownloadLimiter,
+  downloadTrackToFile,
   assertPublicUrl,
   server,
   detectPlatform,

@@ -30,6 +30,7 @@ export async function handler(event) {
       if (!["http:", "https:"].includes(audio.protocol) || audio.username || audio.password || audio.href.length > 2048) throw new Error("Invalid audio URL");
       backend.searchParams.set("audio", audio.href);
     }
+    if(params.prepare==='1'||params.prepare==='status')backend.searchParams.set('prepare',params.prepare);
     return {
       statusCode: 302,
       headers: {

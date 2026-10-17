@@ -41,7 +41,7 @@ npm test
 Render Web Service 可使用：
 
 ```text
-Build Command: python3 -m pip install --upgrade "yt-dlp[default,curl-cffi]"
+Build Command: python3 -m pip install --upgrade "yt-dlp[default,curl-cffi]" "imageio-ffmpeg==0.6.0"
 Start Command: node server.js
 ```
 
@@ -82,3 +82,5 @@ B 站分享短链接会先展开再调用专用解析；多 P 链接保留页码
 第三方服务仍有独立限流，不能作为全部平台的唯一提取器。平台验收须使用真实链接并读取媒体字节，最终以可保存、可播放文件为准。
 
 音画分离的 MP4/M4A 会额外生成“完整视频 MP4（含声音）”保存项。`/api/download?url=...&audio=...` 经相同公网 DNS/重定向校验取回两轨，再用 FFmpeg 仅合并封装；不会把远程地址直接交给 FFmpeg。最多同时合并两个任务，每个任务源文件总量不超过 256 MiB，成品缓存 5 分钟，最多保留 3 个已完成任务。普通完整 MP4 继续走原有流式下载。`imageio-ffmpeg==0.6.0` 为新增必要媒体依赖；旧 Render 后台构建命令未更新时，首次合并会从 PyPI 安装该固定版本。
+
+合并下载可先追加 `prepare=1` 启动准备，再用 `prepare=status` 查询 `preparing/ready/failed` 和可显示的阶段文字。准备完成后以原 URL 保存文件，避免一个长连接一直等待合并。合并输入采用 4 MiB 的 HTTP Range 分段读取，验证范围、总量及长度，并保留所有公网 DNS 与重定向检查；每条轨道总读取时限为 90 秒。
