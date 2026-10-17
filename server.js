@@ -7,6 +7,7 @@ const net = require("net");
 const crypto = require("crypto");
 const { Transform, pipeline } = require("stream");
 const { execFile } = require("child_process");
+const { extractPublicPlatform } = require("./lib/public-platforms.js");
 
 
 const publicDir = path.join(__dirname, "public");
@@ -1140,14 +1141,14 @@ async function extractBilibili(cleanUrl, platform, sourceDetail, io = {requestUr
   const progressive = await io.fetchJson(`https://api.bilibili.com/x/player/playurl?${idQuery}&cid=${cid}&qn=64&fnval=0&platform=html5&high_quality=1`, commonHeaders).catch(() => null);
   const playUrl = `https://api.bilibili.com/x/player/playurl?${idQuery}&cid=${encodeURIComponent(cid)}&qn=80&fnval=4048&fourk=1`;
   const play = await io.fetchJson(playUrl, commonHeaders);
-  if (play.code !== 0 || !play.data) {
+  if ((play.code !== 0 || !play.data) && !progressive?.data?.durl?.length) {
     return {
       error: play.message || "无法读取 B 站播放地址",
       extractor: "bilibili-api"
     };
   }
 
-  const dash = play.data.dash || {};
+  const dash = play.data?.dash || {};
   const seen = new Set();
   const pickUrl = (entry) => entry.baseUrl || entry.base_url || (Array.isArray(entry.backupUrl) ? entry.backupUrl[0] : "") || "";
   const videoItems = Array.isArray(dash.video) ? dash.video : [];
@@ -1445,7 +1446,7 @@ function normalizeExtractorResults(info, cleanUrl, platform, sourceDetail) {
     });
   }
 
-  if (!items.length && info.url && /^https?:\/\//.test(info.url)) {
+  if (!items.length && info.url && isDirectResourceUrl(info.url)) {
     const kind = getMediaKind(info.ext || "");
     items.push({
       label: kind === "网页" ? "提取到的媒体资源" : `${kind}资源`,
@@ -1570,6 +1571,10 @@ async function buildResults(rawUrl) {
   }
 
   let platformExtractorError = "";
+  if (["X / Twitter", "Pinterest", "Vimeo"].includes(platform.name)) {
+    const embedded = await extractPublicPlatform(cleanUrl,platform,sourceDetail,{requestUrl,fetchJson}).catch(() => null);
+    if (embedded) return embedded;
+  }
   if (platform.name === "哔哩哔哩") {
     const bilibiliResult = await extractBilibili(cleanUrl, platform, sourceDetail).catch((err) => ({
       error: err.message,

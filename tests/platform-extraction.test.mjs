@@ -26,3 +26,19 @@ test('shared fallback keeps the actual platform, title, formats and resource hea
 test('unsupported HLS manifests and cover-only fallback are not advertised as MP4 files',()=>{
  assert.equal(backend.buildSnapAnyResult({medias:[{media_type:'video',resource_url:'https://example.com/master.m3u8'}]},'https://vimeo.com/1',{name:'Vimeo'},{}),null);
 });
+
+test('a manifest selected by yt-dlp is not returned as an MP4 file',()=>{
+ assert.equal(backend.normalizeExtractorResults({url:'https://example.com/master.m3u8',ext:'mp4',vcodec:'h264',acodec:'aac'},'https://vimeo.com/1',{name:'Vimeo'},{}),null);
+});
+import publicPlatforms from '../lib/public-platforms.js';
+test('public Pinterest API prefers an MP4 instead of its HLS sibling',()=>{
+ const result=publicPlatforms.buildPinterestPublic({title:'Public pin',videos:{video_list:{HLS:{url:'https://v.pinimg.com/master.m3u8'},MP4:{url:'https://v.pinimg.com/video.mp4',height:720}}}},'https://www.pinterest.com/pin/1/',{name:'Pinterest'},{});
+ assert.equal(result.items.length,1);assert.equal(result.items[0].quality,'720p');
+});
+test('Twitter unified cards retain their actual MP4 video variants',()=>{
+ const result=publicPlatforms.buildTwitterPublic({text:'Public tweet',card:{binding_values:{unified_card:{string_value:JSON.stringify({media_entities:{one:{video_info:{variants:[{content_type:'application/x-mpegURL',url:'https://video.twimg.com/a.m3u8'},{content_type:'video/mp4',url:'https://video.twimg.com/a.mp4',bitrate:832000}]}}}})}}}},'https://x.com/example/status/1',{name:'X / Twitter'},{});
+ assert.equal(result.items.length,1);assert.match(result.items[0].url,/\.mp4$/);
+});
+test('Vimeo HLS-only or DRM stream is not mislabeled as a complete downloadable file',()=>{
+ assert.equal(publicPlatforms.buildVimeoPublic({video:{title:'Protected'},request:{files:{hls:{default_cdn:'one',cdns:{one:{url:'https://example.com/drm/master.m3u8'}}}}}},'https://vimeo.com/1',{name:'Vimeo'},{}),null);
+});
