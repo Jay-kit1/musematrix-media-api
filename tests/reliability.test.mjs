@@ -152,3 +152,11 @@ test('HTTP download forwards Range and validators, preserves 206 and 416', async
     await new Promise(resolve => backend.server.close(resolve));
   }
 });
+
+test('an initial TikTok save uses an open byte range required by its CDN',async()=>{
+ const originalGet=https.get,originalLookup=dns.promises.lookup;let captured;
+ dns.promises.lookup=async()=>[{address:'93.184.216.34',family:4}];
+ https.get=(_url,options,callback)=>{captured=options.headers;const remote=Readable.from([Buffer.from('0000ftypisom')]);remote.statusCode=206;remote.headers={'content-type':'video/mp4','content-length':'12','content-range':'bytes 0-11/12'};const req=new Readable({read(){}});process.nextTick(()=>callback(remote));return req};
+ await new Promise(resolve=>backend.server.listen(0,'127.0.0.1',resolve));
+ try{const r=await fetch(`http://127.0.0.1:${backend.server.address().port}/api/download?url=${encodeURIComponent('https://v16-notes.tiktokcdn-us.com/a.mp4')}`);assert.equal(r.status,206);assert.equal(captured.Range,'bytes=0-');assert.equal(await r.text(),'0000ftypisom');}finally{https.get=originalGet;dns.promises.lookup=originalLookup;await new Promise(resolve=>backend.server.close(resolve));}
+});
