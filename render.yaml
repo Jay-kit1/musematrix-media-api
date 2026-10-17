@@ -3,7 +3,7 @@ services:
     name: musematrix-media-api
     env: node
     plan: free
-    buildCommand: python3 -m pip install --upgrade "yt-dlp[default,curl-cffi]"
+    buildCommand: python3 -m pip install --upgrade "yt-dlp[default,curl-cffi]" "imageio-ffmpeg==0.6.0"
     startCommand: node server.js
     healthCheckPath: /api/health
     envVars:

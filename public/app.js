@@ -385,7 +385,7 @@ async function copyToClipboard(text, button) {
   }
 }
 
-function downloadTrack(url, label, ext = "", button = null) {
+function downloadTrack(url, label, ext = "", button = null, audioUrl = "") {
   const downloadKey = safeHttpUrl(url);
   if (!downloadKey || activeDownloadKeys.has(downloadKey)) return false;
   activeDownloadKeys.add(downloadKey);
@@ -407,9 +407,10 @@ function downloadTrack(url, label, ext = "", button = null) {
   })();
   const extension = (ext || parsedExt || "bin").replace(/[^\w-]/g, "");
   const filename = `${label || 'download'}.${extension}`;
+  const audioQuery = safeHttpUrl(audioUrl) ? `&audio=${encodeURIComponent(audioUrl)}` : "";
   const shouldProxy = backendDownloadAvailable && /^https?:\/\//i.test(url);
   a.href = shouldProxy
-    ? apiUrl(`/api/download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(filename)}`)
+    ? apiUrl(`/api/download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(filename)}${audioQuery}`)
     : url;
   a.download = filename;
   a.rel = "noopener";
@@ -505,7 +506,7 @@ function renderResult(data) {
               </div>
               <span class="pill">${escapeHtml(item.quality)}</span>
               <div class="item-actions">
-                ${item.url ? `<button class="download-link view-btn" type="button" data-action="download" data-url="${escapeHtml(item.url)}" data-label="${escapeHtml(item.label)}" data-ext="${escapeHtml(item.ext || "")}">保存资源</button>` : ""}
+                ${item.url ? `<button class="download-link view-btn" type="button" data-action="download" data-url="${escapeHtml(item.url)}" data-label="${escapeHtml(`${String(data.sourceDetail?.title || data.title || "素材").split("\n")[0].slice(0,70)} - ${item.label}`)}" data-audio-url="${escapeHtml(item.audioUrl || "")}" data-ext="${escapeHtml(item.ext || "")}">保存资源</button>` : ""}
                 ${item.url ? `<button class="ghost-button copy-btn" type="button" data-action="copy" data-url="${escapeHtml(item.url)}">复制链接</button>` : ""}
               </div>
             </div>
@@ -591,7 +592,7 @@ resultPanel.addEventListener("click", (event) => {
   if (action === "download") {
     event.preventDefault();
     event.stopPropagation();
-    downloadTrack(itemUrl, button.dataset.label || "resource", button.dataset.ext || "", button);
+    downloadTrack(itemUrl, button.dataset.label || "resource", button.dataset.ext || "", button, button.dataset.audioUrl || "");
     return;
   }
 

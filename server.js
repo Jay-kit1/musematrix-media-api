@@ -6,6 +6,8 @@ const dns = require("dns").promises;
 const net = require("net");
 const crypto = require("crypto");
 const { Transform, pipeline } = require("stream");
+const { pipeline: pipelineAsync } = require("stream/promises");
+const { mergedFile } = require("./lib/merge-media.js");
 const { execFile } = require("child_process");
 const { extractPublicPlatform } = require("./lib/public-platforms.js");
 
@@ -810,6 +812,9 @@ function buildSnapAnyResult(apiResponse, cleanUrl, platform, sourceDetail) {
     } else push(media.resource_url,'图片','图片资源','jpg',headers);
     for (const variant of Array.isArray(media.variants) ? media.variants : []) {
       const quality = String(variant.quality_label || variant.quality || '');
+      if (isDirectResourceUrl(variant.video_url) && isDirectResourceUrl(variant.audio_url) && ['m4a','mp4'].includes(variant.audio_ext || 'm4a')) {
+        items.push({label:`完整视频 MP4（含声音） ${quality}`,quality,type:'视频',action:'open',url:variant.video_url,audioUrl:variant.audio_url,ext:'mp4',mediaMode:'combined',headers});
+      }
       push(variant.video_url, '视频', `${variant.audio_url ? '仅视频' : '视频'} ${quality}`.trim(), variant.video_ext || 'mp4', headers, quality, variant.audio_url ? 'video-only' : 'combined');
       push(variant.audio_url, '音频', '仅音频 M4A', variant.audio_ext || 'm4a', headers, 'Audio', 'audio-only');
     }
@@ -1239,6 +1244,27 @@ async function extractBilibili(cleanUrl, platform, sourceDetail, io = {requestUr
   };
 }
 
+async function downloadTrackToFile(targetUrl, filePath, limit, redirectCount = 0) {
+  const parsed = parseHttpUrl(targetUrl);
+  const resolved = await assertPublicUrl(parsed);
+  const client = parsed.protocol === 'https:' ? https : http;
+  return new Promise((resolve,reject)=>{
+    const req=client.get(parsed,{headers:getProxyHeadersForHost(parsed.hostname),lookup:createPinnedLookup(resolved),timeout:30000},async remote=>{
+      try {
+        if ([301,302,303,307,308].includes(remote.statusCode) && remote.headers.location) {
+          remote.resume();if(redirectCount>=4)throw new Error('资源重定向过多');
+          resolve(await downloadTrackToFile(new URL(remote.headers.location,parsed).href,filePath,limit,redirectCount+1));return;
+        }
+        if(remote.statusCode!==200 || Number(remote.headers['content-length']||0)>limit){remote.destroy();throw new Error('媒体轨道不可访问或超出合并大小限制');}
+        let bytes=0;
+        const bounded=new Transform({transform(chunk,encoding,callback){bytes+=chunk.length;callback(bytes>limit?new Error('合并资源过大'):null,chunk)}});
+        await pipelineAsync(remote,bounded,fs.createWriteStream(filePath));resolve(bytes);
+      } catch(e){reject(e);}
+    });
+    req.on('timeout',()=>req.destroy(new Error('媒体轨道读取超时')));req.on('error',reject);
+  });
+}
+
 function createDownloadLimiter(limit = maxDownloadBytes) {
   let received = 0;
   return new Transform({
@@ -1404,7 +1430,7 @@ function normalizeExtractorResults(info, cleanUrl, platform, sourceDetail) {
   const sortBest = (list) => list.sort((a, b) => scoreFormat(b) - scoreFormat(a));
   const selected = [];
   const pushFormat = (format, labelPrefix, type) => {
-    if (!format || selected.some((item) => item.url === format.url)) return;
+    if (!format || selected.some((item) => item.url === format.url && !item.audioUrl)) return;
     const quality = format.format_note || format.resolution || (format.height ? `${format.height}p` : format.ext || "media");
     selected.push({
       label: `${labelPrefix} ${quality}`.trim(),
@@ -1428,6 +1454,10 @@ function normalizeExtractorResults(info, cleanUrl, platform, sourceDetail) {
   const fallbackVideos = sortBest(usableFormats.filter((format) => hasVideo(format))).slice(0, 6);
   const fallbackAudio = sortBest(usableFormats.filter((format) => hasAudio(format) && !hasVideo(format))).slice(0, 4);
 
+  const mergeAudio = sortBest(usableFormats.filter(format => ['m4a','mp4'].includes(format.ext) && hasAudio(format) && !hasVideo(format)))[0];
+  if (!muxedMp4 && videoOnlyMp4 && mergeAudio) {
+    selected.push({label:`完整视频 MP4（含声音） ${videoOnlyMp4.height || ''}p`,quality:videoOnlyMp4.height?`${videoOnlyMp4.height}p`:'MP4',type:'视频',action:'open',url:videoOnlyMp4.url,audioUrl:mergeAudio.url,ext:'mp4',mediaMode:'combined',headers:videoOnlyMp4.http_headers});
+  }
   pushFormat(muxedMp4, "MP4 视频", "视频");
   pushFormat(videoOnlyMp4, "仅视频 MP4", "视频");
   pushFormat(audioOnlyPreferred, audioOnlyPreferred && audioOnlyPreferred.ext === "mp3" ? "MP3 音频" : "仅音频", "音频");
@@ -1754,6 +1784,17 @@ const server = http.createServer((req, res) => {
       return;
     }
 
+    const audioUrl = parsedReqUrl.searchParams.get('audio');
+    if (audioUrl) {
+      // Both source URLs go through the same DNS/redirect checks before local-only remuxing.
+      mergedFile(targetUrl,audioUrl,downloadTrackToFile).then(file=>{
+        if(res.destroyed)return;
+        const safeName=String(filename).replace(/[^\w.\-\u4e00-\u9fa5]+/g,'_').slice(0,120);
+        res.writeHead(200,{'Content-Type':'video/mp4','Content-Length':String(file.size),'Content-Disposition':`attachment; filename*=UTF-8''${encodeURIComponent(safeName)}`,'Cache-Control':'no-store'});
+        const stream=fs.createReadStream(file.path);stream.on('error',()=>res.destroy());res.on('close',()=>stream.destroy());stream.pipe(res);
+      }).catch(error=>{if(!res.headersSent&&!res.destroyed)sendText(res,error.status||502,'完整视频合并失败，请重新提取后重试，或分别保存音频和视频轨。');});
+      return;
+    }
     const clientRange = String(req.headers.range || "");
     if (!isValidRangeHeader(clientRange)) {
       sendText(res, 416, "Range 请求格式不正确");

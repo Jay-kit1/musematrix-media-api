@@ -21,7 +21,7 @@ test('a cover alone is not a successful video extraction',()=>{
 });
 test('shared fallback keeps the actual platform, title, formats and resource headers',()=>{
  const result=backend.buildSnapAnyResult({site:'bilibili',title:'考研方向',medias:[{media_type:'video',resource_url:'https://cdn.bilivideo.com/full.mp4',headers:{Referer:'https://www.bilibili.com/'},variants:[{video_url:'https://cdn.bilivideo.com/v.m4s',audio_url:'https://cdn.bilivideo.com/a.m4s',quality_label:'1080p',video_ext:'mp4',audio_ext:'m4a'}]}]},'https://b23.tv/Ql06ish',{name:'哔哩哔哩'},{});
- assert.equal(result.platform.name,'哔哩哔哩');assert.equal(result.items[0].headers.Referer,'https://www.bilibili.com/');assert.equal(result.items[0].mediaMode,'combined');assert.equal(result.items.length,3);assert.ok(result.items.some(i=>i.type==='音频'));
+ assert.equal(result.platform.name,'哔哩哔哩');assert.equal(result.items[0].headers.Referer,'https://www.bilibili.com/');assert.equal(result.items[0].mediaMode,'combined');assert.equal(result.items.length,4);assert.ok(result.items.some(i=>i.type==='音频'));
 });
 test('unsupported HLS manifests and cover-only fallback are not advertised as MP4 files',()=>{
  assert.equal(backend.buildSnapAnyResult({medias:[{media_type:'video',resource_url:'https://example.com/master.m3u8'}]},'https://vimeo.com/1',{name:'Vimeo'},{}),null);
@@ -41,4 +41,9 @@ test('Twitter unified cards retain their actual MP4 video variants',()=>{
 });
 test('Vimeo HLS-only or DRM stream is not mislabeled as a complete downloadable file',()=>{
  assert.equal(publicPlatforms.buildVimeoPublic({video:{title:'Protected'},request:{files:{hls:{default_cdn:'one',cdns:{one:{url:'https://example.com/drm/master.m3u8'}}}}}},'https://vimeo.com/1',{name:'Vimeo'},{}),null);
+});
+
+test('DASH-only video becomes a complete save action without hiding original tracks',()=>{
+ const r=backend.normalizeExtractorResults({title:'Two tracks',formats:[{url:'https://cdn.example/v.mp4',ext:'mp4',vcodec:'h264',acodec:'none',height:720},{url:'https://cdn.example/a.m4a',ext:'m4a',vcodec:'none',acodec:'aac'}]},'https://www.instagram.com/reel/test',{name:'Instagram'},{});
+ assert.ok(r.items.some(i=>i.mediaMode==='combined'&&i.audioUrl));assert.ok(r.items.some(i=>i.mediaMode==='video-only'));assert.ok(r.items.some(i=>i.mediaMode==='audio-only'));
 });

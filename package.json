@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "build": "python3 -m pip install --upgrade \"yt-dlp[default,curl-cffi]\"",
+    "build": "python3 -m pip install --upgrade \"yt-dlp[default,curl-cffi]\" \"imageio-ffmpeg==0.6.0\"",
     "audit": "node tools/audit.mjs && node tools/backend-audit.mjs",
     "audit:backend": "node tools/backend-audit.mjs",
     "test": "node --test tests/*.test.mjs"

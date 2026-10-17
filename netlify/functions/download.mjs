@@ -25,6 +25,11 @@ export async function handler(event) {
     const backend = new URL(BACKEND_DOWNLOAD);
     backend.searchParams.set("url", target.toString());
     backend.searchParams.set("filename", String(params.filename || "resource").slice(0, 160));
+    if (params.audio) {
+      const audio = new URL(params.audio);
+      if (!["http:", "https:"].includes(audio.protocol) || audio.username || audio.password || audio.href.length > 2048) throw new Error("Invalid audio URL");
+      backend.searchParams.set("audio", audio.href);
+    }
     return {
       statusCode: 302,
       headers: {
