@@ -72,7 +72,10 @@ test('Kuaishou public share state yields actual MP4 URLs without executing page 
 });
 
 test('Douyin expands a short share to its clean public share page before extraction',async()=>{
- const url=await backend.resolvePlatformUrl('https://v.douyin.com/aKNXWqFB5mE/',{name:'抖音 / TikTok'},async()=>({finalUrl:'https://www.iesdouyin.com/share/video/7665672488277331209/?did=tracking&share_sign=tracking'}));
+ const url=await backend.resolvePlatformUrl('https://v.douyin.com/aKNXWqFB5mE/',{name:'抖音 / TikTok'},async(_url,options)=>{
+  assert.equal(options.followRedirects,false);
+  return {finalUrl:_url,headers:{location:'https://www.iesdouyin.com/share/video/7665672488277331209/?did=tracking&share_sign=tracking'}};
+ });
  assert.equal(url,'https://www.iesdouyin.com/share/video/7665672488277331209/');
  assert.equal(backend.getDouyinShareCandidates('https://v.douyin.com/aKNXWqFB5mE/',{webpage_url:url})[0],'https://www.iesdouyin.com/share/video/7665672488277331209');
 });

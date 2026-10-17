@@ -416,7 +416,7 @@ async function requestUrl(targetUrl, options = {}) {
       lookup: createPinnedLookup(resolved)
     }, (remoteRes) => {
       const location = remoteRes.headers.location;
-      if ([301, 302, 303, 307, 308].includes(remoteRes.statusCode) && location && redirectCount < 4) {
+      if ([301, 302, 303, 307, 308].includes(remoteRes.statusCode) && location && redirectCount < 4 && options.followRedirects !== false) {
         remoteRes.resume();
         const nextUrl = new URL(location, parsed).toString();
         requestUrl(nextUrl, {
@@ -1340,8 +1340,8 @@ function detectPlatform(rawUrl) {
 
 async function resolvePlatformUrl(cleanUrl, platform, request = requestUrl) {
   if(platform.name==='抖音 / TikTok'&&isDouyinLikeUrl(cleanUrl)&&parseHttpUrl(cleanUrl).hostname==='v.douyin.com'){
-    const response=await request(cleanUrl,{method:'HEAD',timeout:12000});
-    const target=parseHttpUrl(response.finalUrl);
+    const response=await request(cleanUrl,{method:'HEAD',timeout:12000,followRedirects:false});
+    const target=parseHttpUrl(new URL(response.headers?.location||response.finalUrl,cleanUrl).href);
     if(!['douyin.com','iesdouyin.com','amemv.com'].some(domain=>isSameOrSubdomain(target.hostname,domain)))throw new Error('分享链接没有指向抖音作品');
     const id=extractDouyinAwemeId(target.href);
     return id?`https://www.iesdouyin.com/share/video/${id}/`:target.href;
