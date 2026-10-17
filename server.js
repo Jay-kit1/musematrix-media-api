@@ -10,6 +10,7 @@ const { pipeline: pipelineAsync } = require("stream/promises");
 const { mergedFile, prepareMergedFile } = require("./lib/merge-media.js");
 const { execFile } = require("child_process");
 const { extractPublicPlatform } = require("./lib/public-platforms.js");
+const {getDouyinShareItemFromHtml,buildDouyinShareResult}=require("./lib/douyin-share.cjs");
 
 
 const publicDir = path.join(__dirname, "public");
@@ -692,57 +693,6 @@ function firstUrlFromUrlList(resource) {
   return "";
 }
 
-function extractAssignedJson(html, assignmentName) {
-  const marker = `${assignmentName} = `;
-  const start = html.indexOf(marker);
-  if (start < 0) return null;
-
-  const jsonStart = html.indexOf("{", start + marker.length);
-  if (jsonStart < 0) return null;
-
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let index = jsonStart; index < html.length; index += 1) {
-    const char = html[index];
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (char === "\\") {
-        escaped = true;
-      } else if (char === '"') {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (char === '"') {
-      inString = true;
-    } else if (char === "{") {
-      depth += 1;
-    } else if (char === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        return JSON.parse(html.slice(jsonStart, index + 1));
-      }
-    }
-  }
-
-  return null;
-}
-
-function getDouyinShareItemFromHtml(html) {
-  const routerData = extractAssignedJson(html, "window._ROUTER_DATA");
-  const loaderData = routerData && routerData.loaderData ? routerData.loaderData : {};
-  const pageData = Object.values(loaderData).find((entry) =>
-    entry && typeof entry === "object" && entry.videoInfoRes
-  ) || {};
-  const itemList = pageData.videoInfoRes && Array.isArray(pageData.videoInfoRes.item_list)
-    ? pageData.videoInfoRes.item_list
-    : [];
-  return itemList[0] || null;
-}
-
 function isDouyinLikeUrl(cleanUrl) {
   try {
     const host = parseHttpUrl(cleanUrl).hostname.toLowerCase();
@@ -940,86 +890,6 @@ function mergeTikTokFallback(result, fallback) {
       tiktokFallback: "tikwm"
     },
     items: merged.slice(0, 12)
-  };
-}
-
-function buildDouyinShareResult(item, cleanUrl, finalUrl, platform, sourceDetail) {
-  if (!item || !item.video) return null;
-
-  const playUrl = firstUrlFromUrlList(item.video.play_addr);
-  if (!playUrl) return null;
-
-  const coverUrl = firstUrlFromUrlList(item.video.cover);
-  const music = item.music || {};
-  const musicUrl = firstUrlFromUrlList(music.play_url || music.play_url_64 || music.play_url_hq);
-  const items = [];
-
-  if (coverUrl) {
-    items.push({
-      label: "封面图片",
-      quality: "Cover",
-      type: "图片",
-      action: "open",
-      url: coverUrl,
-      ext: coverUrl.includes(".webp") ? "webp" : "jpg"
-    });
-  }
-
-  items.push({
-    label: `MP4 视频 ${item.video.width || ""}x${item.video.height || ""}`.trim(),
-    quality: item.video.height ? `${item.video.height}p` : "MP4",
-    type: "视频",
-    action: "open",
-    url: playUrl,
-    ext: "mp4",
-    size: 0,
-    formatId: item.video.play_addr && item.video.play_addr.uri ? item.video.play_addr.uri : "",
-    codec: "mp4",
-    headers: {
-      "User-Agent": browserUserAgent,
-      "Referer": finalUrl || "https://www.douyin.com/",
-      "Origin": "https://www.douyin.com"
-    }
-  });
-
-  if (musicUrl) {
-    items.push({
-      label: `MP3 音频 ${music.title || "抖音原声"}`.trim(),
-      quality: "Original Sound",
-      type: "音频",
-      action: "open",
-      url: musicUrl,
-      ext: "mp3",
-      size: 0,
-      formatId: music.mid || "",
-      codec: "mp3",
-      headers: {
-        "User-Agent": browserUserAgent,
-        "Referer": finalUrl || "https://www.douyin.com/",
-        "Origin": "https://www.douyin.com"
-      }
-    });
-  }
-
-  return {
-    url: cleanUrl,
-    platform,
-    title: `${item.desc || platform.name} · 媒体已提取`,
-    note: musicUrl
-      ? "已通过抖音分享页数据提取视频和原声音频。请只处理你有权使用或平台允许保存的内容。"
-      : "已通过抖音分享页数据提取 MP4 视频；原声音频未在公开分享页单独提供，音频已内嵌在视频中。",
-    sourceDetail: {
-      ...sourceDetail,
-      extractor: "douyin-share-html",
-      title: item.desc || "",
-      author: item.author && item.author.nickname ? item.author.nickname : "",
-      duration: item.video.duration || (music.duration ? music.duration * 1000 : 0),
-      thumbnail: coverUrl,
-      awemeId: item.aweme_id || item.group_id_str || "",
-      finalUrl,
-      cookieConfigured: Boolean(getCookieFilePath() || process.env.YTDLP_COOKIES_FROM_BROWSER)
-    },
-    items
   };
 }
 
@@ -1469,6 +1339,13 @@ function detectPlatform(rawUrl) {
 }
 
 async function resolvePlatformUrl(cleanUrl, platform, request = requestUrl) {
+  if(platform.name==='抖音 / TikTok'&&isDouyinLikeUrl(cleanUrl)&&parseHttpUrl(cleanUrl).hostname==='v.douyin.com'){
+    const response=await request(cleanUrl,{method:'HEAD',timeout:12000});
+    const target=parseHttpUrl(response.finalUrl);
+    if(!['douyin.com','iesdouyin.com','amemv.com'].some(domain=>isSameOrSubdomain(target.hostname,domain)))throw new Error('分享链接没有指向抖音作品');
+    const id=extractDouyinAwemeId(target.href);
+    return id?`https://www.iesdouyin.com/share/video/${id}/`:target.href;
+  }
   if (platform.name !== '哔哩哔哩' || parseHttpUrl(cleanUrl).hostname !== 'b23.tv') return cleanUrl;
   const response = await request(cleanUrl, {method:'HEAD',timeout:12000});
   const target = parseHttpUrl(response.finalUrl);
@@ -1545,7 +1422,7 @@ async function buildResults(rawUrl) {
   }
 
   if (platform.name === "抖音 / TikTok" && isDouyinLikeUrl(cleanUrl)) {
-    const douyinShareResult = await extractDouyinShareHtml(cleanUrl, platform, sourceDetail).catch(() => null);
+    const douyinShareResult = await extractDouyinShareHtml(cleanUrl, platform, sourceDetail,{webpage_url:extractorUrl}).catch(() => null);
     if (douyinShareResult) {
       return douyinShareResult;
     }

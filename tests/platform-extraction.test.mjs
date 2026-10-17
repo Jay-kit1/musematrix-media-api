@@ -70,3 +70,18 @@ test('Kuaishou public share state yields actual MP4 URLs without executing page 
  const d=publicPlatforms.buildKuaishouPublic(html,'https://www.kuaishou.com/short-video/public',{name:'快手'},{});
  assert.equal(d.items[0].mediaMode,'combined');assert.equal(d.sourceDetail.title,'Public travel video');
 });
+
+test('Douyin expands a short share to its clean public share page before extraction',async()=>{
+ const url=await backend.resolvePlatformUrl('https://v.douyin.com/aKNXWqFB5mE/',{name:'抖音 / TikTok'},async()=>({finalUrl:'https://www.iesdouyin.com/share/video/7665672488277331209/?did=tracking&share_sign=tracking'}));
+ assert.equal(url,'https://www.iesdouyin.com/share/video/7665672488277331209/');
+ assert.equal(backend.getDouyinShareCandidates('https://v.douyin.com/aKNXWqFB5mE/',{webpage_url:url})[0],'https://www.iesdouyin.com/share/video/7665672488277331209');
+});
+
+test('public share JSON parses across whitespace variants without executing JavaScript',()=>{
+ const data={loaderData:{one:{videoInfoRes:{item_list:[{desc:'Public video',video:{duration:12000,play_addr:{url_list:['https://v.douyinvod.com/v.mp4']}}}]}}}};
+ for(const separator of ['=',' = ','\n=\n']){
+  const item=backend.getDouyinShareItemFromHtml('<script>window._ROUTER_DATA'+separator+JSON.stringify(data)+'</script>');
+  const result=backend.buildDouyinShareResult(item,'https://v.douyin.com/aKNXWqFB5mE/','https://www.iesdouyin.com/',{name:'抖音 / TikTok'},{});
+  assert.equal(result.items[0].mediaMode,'combined');assert.equal(result.sourceDetail.duration,12);
+ }
+});
