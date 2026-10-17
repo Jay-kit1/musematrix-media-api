@@ -307,7 +307,7 @@ function getProxyHeadersForHost(hostname) {
     "Accept": "*/*"
   };
 
-  if (host.includes("bilivideo.com") || host.includes("hdslb.com")) {
+  if (host.includes("bilivideo.com") || host.includes("bilivideo.cn") || host.includes("mountaintoys.cn") || host.includes("hdslb.com")) {
     headers["Referer"] = "https://www.bilibili.com/";
     headers["Origin"] = "https://www.bilibili.com";
   } else if (host.includes("tiktok") || host.includes("muscdn.com")) {
@@ -778,77 +778,59 @@ function buildSnapAnyHeaders(cleanUrl, locale = "en", timestamp = Date.now()) {
   };
 }
 
-function buildSnapAnyResult(apiResponse, cleanUrl, platform, sourceDetail) {
-  const medias = apiResponse && Array.isArray(apiResponse.medias) ? apiResponse.medias : [];
-  const usable = medias.filter((media) =>
-    media &&
-    ["video", "audio", "image"].includes(media.media_type) &&
-    /^https?:\/\//.test(media.resource_url || "")
-  );
-  if (!usable.length) return null;
-
-  const commonHeaders = {
-    "User-Agent": browserUserAgent,
-    "Referer": "https://www.douyin.com/",
-    "Origin": "https://www.douyin.com"
-  };
-  const items = [];
-  const previewUrl = usable.find((media) => /^https?:\/\//.test(media.preview_url || ""))?.preview_url || "";
-  if (previewUrl) {
-    items.push({
-      label: "封面图片",
-      quality: "Cover",
-      type: "图片",
-      action: "open",
-      url: previewUrl,
-      ext: "jpg"
-    });
-  }
-  usable.forEach((media) => {
-    const type = media.media_type === "video" ? "视频" : media.media_type === "audio" ? "音频" : "图片";
-    items.push({
-      label: type === "视频" ? "MP4 视频" : type === "音频" ? "M4A 原声音频" : "图片资源",
-      quality: type === "视频" ? "MP4" : type === "音频" ? "Original Sound" : "Image",
-      type,
-      action: "open",
-      url: media.resource_url,
-      ext: type === "视频" ? "mp4" : type === "音频" ? "m4a" : "jpg",
-      size: 0,
-      headers: commonHeaders
-    });
-  });
-
-  return {
-    url: cleanUrl,
-    platform,
-    title: `${apiResponse.text || apiResponse.title || "抖音作品"} · 媒体已提取`,
-    note: "主提取器受平台风控限制，已通过冗余解析通道获取公开视频、原声音频和封面。请只处理你有权使用或平台允许保存的内容。",
-    sourceDetail: {
-      ...sourceDetail,
-      extractor: "snapany-fallback",
-      title: apiResponse.title || apiResponse.text || "",
-      awemeId: apiResponse.id || "",
-      thumbnail: previewUrl
-    },
-    items: items.slice(0, 12)
-  };
+function isDirectResourceUrl(value) {
+  try {
+    const url = parseHttpUrl(value);
+    return !/\.(?:m3u8|mpd)(?:$|[?#])/i.test(url.href);
+  } catch { return false; }
 }
 
-async function extractSnapAnyDouyin(cleanUrl, platform, sourceDetail) {
-  if (!isDouyinLikeUrl(cleanUrl)) return null;
-  const body = JSON.stringify({ link: cleanUrl });
-  const response = await requestUrl("https://api.snapany.com/v1/extract/post", {
-    method: "POST",
-    body,
-    limit: maxRemoteJsonBytes,
-    timeout: 20000,
-    headers: {
-      ...buildSnapAnyHeaders(cleanUrl),
-      "Content-Length": Buffer.byteLength(body)
+function buildSnapAnyResult(apiResponse, cleanUrl, platform, sourceDetail) {
+  const medias = Array.isArray(apiResponse?.medias) ? apiResponse.medias : [];
+  const items = [];
+  const seen = new Set();
+  const push = (url, type, label, ext, headers, quality = '', mediaMode = '') => {
+    if (!isDirectResourceUrl(url) || seen.has(url)) return;
+    seen.add(url);
+    items.push({label, quality: quality || ext.toUpperCase(), type, action:'open', url,
+      ext, headers, mediaMode});
+  };
+  for (const media of medias) {
+    if (!media || !['video','audio','image'].includes(media.media_type)) continue;
+    const headers = { ...getProxyHeadersForHost(String(media.resource_url || '')) };
+    // Only replay resource headers, never arbitrary cookies or auth data.
+    for (const name of ['User-Agent', 'Referer', 'Origin']) {
+      if (typeof media.headers?.[name] === 'string') headers[name] = media.headers[name];
     }
+    if (media.media_type === 'video') {
+      push(media.resource_url, '视频', platform.name === '哔哩哔哩' ? '完整视频 MP4（含声音）' : 'MP4 视频', 'mp4', headers, 'MP4', 'combined');
+    } else if (media.media_type === 'audio') {
+      push(media.resource_url,'音频','原声音频','m4a',headers);
+    } else push(media.resource_url,'图片','图片资源','jpg',headers);
+    for (const variant of Array.isArray(media.variants) ? media.variants : []) {
+      const quality = String(variant.quality_label || variant.quality || '');
+      push(variant.video_url, '视频', `${variant.audio_url ? '仅视频' : '视频'} ${quality}`.trim(), variant.video_ext || 'mp4', headers, quality, variant.audio_url ? 'video-only' : 'combined');
+      push(variant.audio_url, '音频', '仅音频 M4A', variant.audio_ext || 'm4a', headers, 'Audio', 'audio-only');
+    }
+  }
+  if (!items.length) return null;
+  const previewUrl = medias.find(m => isDirectResourceUrl(m?.preview_url))?.preview_url || '';
+  if (previewUrl && !seen.has(previewUrl)) items.push({label:'封面图片',quality:'Cover',type:'图片',action:'open',url:previewUrl,ext:'jpg'});
+  const title = apiResponse.title || apiResponse.text || `${platform.name}作品`;
+  return {url:cleanUrl,platform,success:true,title:`${title} · 媒体已提取`,
+    note:'已取得可保存资源；仅视频、仅音频已分别标注。',
+    sourceDetail:{...sourceDetail,extractor:'snapany-fallback',title,awemeId:apiResponse.id || '',thumbnail:previewUrl},items:items.slice(0,20)};
+}
+
+async function extractSnapAny(cleanUrl, platform, sourceDetail) {
+  if (platform.name === '通用网页') return null;
+  const body = JSON.stringify({link:cleanUrl});
+  const response = await requestUrl('https://api.snapany.com/v1/extract/post', {
+    method:'POST',body,limit:maxRemoteJsonBytes,timeout:20000,
+    headers:{...buildSnapAnyHeaders(cleanUrl),'Content-Length':Buffer.byteLength(body)}
   });
   if (response.statusCode < 200 || response.statusCode >= 300 || response.truncated) return null;
-  return buildSnapAnyResult(JSON.parse(response.body || "{}"), cleanUrl, platform, sourceDetail);
+  return buildSnapAnyResult(JSON.parse(response.body || '{}'),cleanUrl,platform,sourceDetail);
 }
 
 function buildTikwmResult(apiResponse, cleanUrl, platform, sourceDetail) {
@@ -1125,8 +1107,14 @@ async function addPlatformExtraItems(result, cleanUrl, platform, extractorInfo =
   return result;
 }
 
-async function extractBilibili(cleanUrl, platform, sourceDetail) {
-  const ids = extractBilibiliId(cleanUrl);
+async function extractBilibili(cleanUrl, platform, sourceDetail, io = {requestUrl, fetchJson}) {
+  let resolvedUrl = cleanUrl;
+  if (isSameOrSubdomain(parseHttpUrl(cleanUrl).hostname, 'b23.tv')) {
+    const resolved = await io.requestUrl(cleanUrl, {method:'HEAD', timeout:12000});
+    resolvedUrl = resolved.finalUrl;
+    if (!isSameOrSubdomain(parseHttpUrl(resolvedUrl).hostname, 'bilibili.com')) return null;
+  }
+  const ids = extractBilibiliId(resolvedUrl);
   if (!ids) return null;
 
   const idQuery = ids.bvid ? `bvid=${encodeURIComponent(ids.bvid)}` : `aid=${encodeURIComponent(ids.aid)}`;
@@ -1138,7 +1126,7 @@ async function extractBilibili(cleanUrl, platform, sourceDetail) {
     "Referer": referer
   };
 
-  const view = await fetchJson(`https://api.bilibili.com/x/web-interface/view?${idQuery}`, commonHeaders);
+  const view = await io.fetchJson(`https://api.bilibili.com/x/web-interface/view?${idQuery}`, commonHeaders);
   if (view.code !== 0 || !view.data || !view.data.cid) {
     return {
       error: view.message || "无法读取 B 站视频详情",
@@ -1146,9 +1134,12 @@ async function extractBilibili(cleanUrl, platform, sourceDetail) {
     };
   }
 
-  const cid = view.data.cid;
+  const page = Math.max(1, Number(new URL(resolvedUrl).searchParams.get('p')) || 1);
+  const cid = view.data.pages?.find(entry => entry.page === page)?.cid || view.data.cid;
+  // HTML5 progressive MP4 contains sound and can be saved without a merge step.
+  const progressive = await io.fetchJson(`https://api.bilibili.com/x/player/playurl?${idQuery}&cid=${cid}&qn=64&fnval=0&platform=html5&high_quality=1`, commonHeaders).catch(() => null);
   const playUrl = `https://api.bilibili.com/x/player/playurl?${idQuery}&cid=${encodeURIComponent(cid)}&qn=80&fnval=4048&fourk=1`;
-  const play = await fetchJson(playUrl, commonHeaders);
+  const play = await io.fetchJson(playUrl, commonHeaders);
   if (play.code !== 0 || !play.data) {
     return {
       error: play.message || "无法读取 B 站播放地址",
@@ -1162,6 +1153,11 @@ async function extractBilibili(cleanUrl, platform, sourceDetail) {
   const videoItems = Array.isArray(dash.video) ? dash.video : [];
   const audioItems = Array.isArray(dash.audio) ? dash.audio : [];
   const items = [];
+  const fullFiles = progressive?.code === 0 && Array.isArray(progressive.data?.durl) ? progressive.data.durl : [];
+  // Multi-segment legacy FLV is not a standalone complete MP4.
+  if (fullFiles.length === 1 && isDirectResourceUrl(fullFiles[0].url) && !/\.flv(?:[?]|$)/i.test(fullFiles[0].url)) {
+    items.push({label:'完整视频 MP4（含声音）',quality:`${progressive.data.quality || 'HTML5'}`,type:'视频',action:'open',url:fullFiles[0].url,ext:'mp4',size:Number(fullFiles[0].size || 0),mediaMode:'combined',headers:commonHeaders});
+  }
   const pushMedia = (entry, label, type) => {
     const mediaUrl = pickUrl(entry);
     if (!mediaUrl || seen.has(mediaUrl)) return;
@@ -1174,7 +1170,8 @@ async function extractBilibili(cleanUrl, platform, sourceDetail) {
       type,
       action: "open",
       url: mediaUrl,
-      ext: entry.mimeType && entry.mimeType.includes("mp4") ? "mp4" : "",
+      ext: type === "音频" ? "m4a" : "mp4",
+      mediaMode: type === "音频" ? "audio-only" : "video-only",
       size: Number(entry.bandwidth || 0),
       formatId: String(entry.id || ""),
       codec: entry.codecs || "",
@@ -1212,7 +1209,7 @@ async function extractBilibili(cleanUrl, platform, sourceDetail) {
     });
   }
 
-  if (!items.some((item) => item.type === "视频") || !items.some((item) => item.type === "音频")) {
+  if (!items.some((item) => item.type === "视频")) {
     return {
       error: "B 站接口未返回可用音频或视频轨",
       extractor: "bilibili-api"
@@ -1223,10 +1220,12 @@ async function extractBilibili(cleanUrl, platform, sourceDetail) {
     url: cleanUrl,
     platform,
     title: `${view.data.title || platform.name} · 媒体已提取`,
-    note: "已通过 B 站公开播放信息提取视频轨和音频轨。DASH 资源通常是音视频分离的，前端可分别保存或后续用 ffmpeg 合并。",
+    note: items.some(item => item.mediaMode === "combined") ? "优先保存完整视频（含声音）。高清仅视频轨和音频轨可分别保存。" : "本次仅返回分离的视频和音频轨，已分别标注。",
     sourceDetail: {
       ...sourceDetail,
       extractor: "bilibili-api",
+      finalUrl: resolvedUrl,
+      page,
       title: view.data.title || "",
       author: view.data.owner && view.data.owner.name ? view.data.owner.name : "",
       duration: view.data.duration || 0,
@@ -1387,7 +1386,7 @@ function normalizeExtractorResults(info, cleanUrl, platform, sourceDetail) {
   }
   const seen = new Set();
   const usableFormats = formats
-    .filter((format) => format && typeof format.url === "string" && /^https?:\/\//.test(format.url))
+    .filter((format) => format && typeof format.url === "string" && isDirectResourceUrl(format.url))
     .filter((format) => {
       const key = `${format.url}|${format.format_id || ""}`;
       if (seen.has(key)) return false;
@@ -1415,6 +1414,7 @@ function normalizeExtractorResults(info, cleanUrl, platform, sourceDetail) {
       ext: format.ext || "",
       size: format.filesize || format.filesize_approx || 0,
       formatId: format.format_id || "",
+      mediaMode: hasVideo(format) ? (hasAudio(format) ? "combined" : "video-only") : "audio-only",
       codec: [format.vcodec, format.acodec].filter(Boolean).join(" / "),
       headers: format.http_headers || undefined
     });
@@ -1457,7 +1457,7 @@ function normalizeExtractorResults(info, cleanUrl, platform, sourceDetail) {
     });
   }
 
-  if (!items.length) {
+  if (!items.some(item => ["视频", "音频", "资源"].includes(item.type))) {
     return null;
   }
 
@@ -1489,11 +1489,14 @@ function detectPlatform(rawUrl) {
 
   const host = parsed.hostname.replace(/^www\./, "");
   const platforms = [
-    ["抖音 / TikTok", ["douyin.com", "tiktok.com"], "♪"],
+    ["抖音 / TikTok", ["douyin.com", "iesdouyin.com", "amemv.com", "tiktok.com"], "♪"],
     ["YouTube", ["youtube.com", "youtu.be"], "▶"],
     ["哔哩哔哩", ["bilibili.com", "b23.tv"], "B"],
     ["X / Twitter", ["x.com", "twitter.com"], "X"],
-    ["Pinterest", ["pinterest.com", "pin.it"], "P"],
+    ["Pinterest", ["pinterest.com", "pinterest.ca", "pin.it"], "P"],
+    ["小红书", ["xiaohongshu.com", "xhslink.com"], "红"],
+    ["快手", ["kuaishou.com", "gifshow.com"], "快"],
+    ["微博", ["weibo.com", "weibo.cn"], "微"],
     ["Facebook", ["facebook.com", "fb.watch"], "f"],
     ["Instagram", ["instagram.com"], "◎"],
     ["Reddit", ["reddit.com"], "R"],
@@ -1585,14 +1588,16 @@ async function buildResults(rawUrl) {
     }
   }
 
-  const [extractorInfo, pageDetails, tiktokFallback] = await Promise.all([
+  const [extractorInfo, pageDetails, tiktokFallback, sharedFallback] = await Promise.all([
     platform.name === "通用网页" ? Promise.resolve(null) : runYtDlp(cleanUrl),
     fetchPageDetails(cleanUrl),
     isTikTokLikeUrl(cleanUrl)
       ? extractTikwm(cleanUrl, platform, sourceDetail).catch(() => null)
-      : Promise.resolve(null)
+      : Promise.resolve(null),
+    platform.name !== "通用网页" ? extractSnapAny(cleanUrl, platform, sourceDetail).catch(() => null) : Promise.resolve(null)
   ]);
   const extracted = normalizeExtractorResults(extractorInfo, cleanUrl, platform, sourceDetail);
+  if (sharedFallback && (!extracted || (!extracted.items.some(item => item.mediaMode === "combined") && sharedFallback.items.some(item => item.mediaMode === "combined")))) return sharedFallback;
   if (extracted) {
     const enriched = await addPlatformExtraItems(extracted, cleanUrl, platform, extractorInfo || {});
     return mergeTikTokFallback(enriched, tiktokFallback);
@@ -1607,14 +1612,12 @@ async function buildResults(rawUrl) {
     if (directShareResult) {
       return directShareResult;
     }
-    const redundantResult = await extractSnapAnyDouyin(cleanUrl, platform, sourceDetail).catch(() => null);
-    if (redundantResult) {
-      return redundantResult;
-    }
+
   }
   if (tiktokFallback) {
     return tiktokFallback;
   }
+  if (sharedFallback) return sharedFallback;
   const detailItems = [
     {
       label: "原始链接",
@@ -1873,6 +1876,7 @@ module.exports = {
   isValidRangeHeader,
   getRemoteTotalBytes,
   extractBilibiliId,
+  extractBilibili,
   extractDouyinAwemeId,
   buildDouyinMusicItem,
   isDouyinLikeUrl,
