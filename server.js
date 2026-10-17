@@ -1170,6 +1170,9 @@ async function proxyRemoteFile(targetUrl, filename, res, redirectCount = 0, clie
   if (clientRange) {
     requestHeaders.Range = clientRange;
     if (ifRange) requestHeaders["If-Range"] = ifRange;
+  } else if (/tiktokcdn|tiktok\.com/i.test(parsed.hostname)) {
+    // These CDN hosts can require a range even for a complete initial save.
+    requestHeaders.Range = "bytes=0-";
   }
 
   const req = client.get(parsed, {
