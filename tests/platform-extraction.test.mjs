@@ -57,3 +57,9 @@ test('every Bilibili extractor receives the expanded canonical URL, preserving t
 test('Weibo media saves preserve the source Referer required by its CDN',()=>{
  assert.equal(backend.getProxyHeadersForHost('f.video.weibocdn.com').Referer,'https://weibo.com/');
 });
+
+test('Kuaishou public share state yields actual MP4 URLs without executing page scripts',()=>{
+ const html='<script>window.INIT_STATE = '+JSON.stringify({opaque:{photo:{caption:'Public travel video',mainMvUrls:[{url:'https://txmov2.a.kwimgs.com/video.mp4'}]}}})+';</script>';
+ const d=publicPlatforms.buildKuaishouPublic(html,'https://www.kuaishou.com/short-video/public',{name:'快手'},{});
+ assert.equal(d.items[0].mediaMode,'combined');assert.equal(d.sourceDetail.title,'Public travel video');
+});

@@ -337,6 +337,9 @@ function getProxyHeadersForHost(hostname) {
   } else if (host.includes("googlevideo.com") || host.includes("ytimg.com")) {
     headers["Referer"] = "https://www.youtube.com/";
     headers["Origin"] = "https://www.youtube.com";
+  } else if (host.includes("kwimgs.com") || host.includes("kwaicdn.com")) {
+    headers["Referer"] = "https://www.kuaishou.com/";
+    headers["Origin"] = "https://www.kuaishou.com";
   } else if (host.includes("weibocdn.com") || host.includes("sinaimg.cn")) {
     headers["Referer"] = "https://weibo.com/";
     headers["Origin"] = "https://weibo.com";
@@ -1495,7 +1498,7 @@ async function buildResults(rawUrl) {
 
   const extractorUrl = await resolvePlatformUrl(cleanUrl,platform).catch(() => cleanUrl);
   let platformExtractorError = "";
-  if (["X / Twitter", "Pinterest", "Vimeo"].includes(platform.name)) {
+  if (["X / Twitter", "Pinterest", "Vimeo", "快手"].includes(platform.name)) {
     const embedded = await extractPublicPlatform(cleanUrl,platform,sourceDetail,{requestUrl,fetchJson}).catch(() => null);
     if (embedded) return embedded;
   }
