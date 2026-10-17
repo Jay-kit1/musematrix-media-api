@@ -58,6 +58,13 @@ test('Weibo media saves preserve the source Referer required by its CDN',()=>{
  assert.equal(backend.getProxyHeadersForHost('f.video.weibocdn.com').Referer,'https://weibo.com/');
 });
 
+test('Bilibili overseas Akamai tracks receive the same required source headers',()=>{
+  for (const host of ['upos-hz-mirrorakam.akamaized.net','upos-hz-mirrorakam.akamaized.net/upgcxcode/00/video.m4s']) {
+    assert.equal(backend.getProxyHeadersForHost(host).Referer,'https://www.bilibili.com/');
+  }
+  assert.equal(backend.getProxyHeadersForHost('other.akamaized.net').Referer,undefined);
+});
+
 test('Kuaishou public share state yields actual MP4 URLs without executing page scripts',()=>{
  const html='<script>window.INIT_STATE = '+JSON.stringify({opaque:{photo:{caption:'Public travel video',mainMvUrls:[{url:'https://txmov2.a.kwimgs.com/video.mp4'}]}}})+';</script>';
  const d=publicPlatforms.buildKuaishouPublic(html,'https://www.kuaishou.com/short-video/public',{name:'快手'},{});

@@ -310,7 +310,7 @@ function getProxyHeadersForHost(hostname) {
     "Accept": "*/*"
   };
 
-  if (host.includes("bilivideo.com") || host.includes("bilivideo.cn") || host.includes("mountaintoys.cn") || host.includes("hdslb.com")) {
+  if (host.includes("bilivideo.com") || host.includes("bilivideo.cn") || host.includes("mountaintoys.cn") || host.includes("hdslb.com") || /^upos-hz-mirrorakam\.akamaized\.net(?:\/|$)/.test(host)) {
     headers["Referer"] = "https://www.bilibili.com/";
     headers["Origin"] = "https://www.bilibili.com";
   } else if (host.includes("tiktok") || host.includes("muscdn.com")) {
