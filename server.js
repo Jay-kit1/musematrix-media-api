@@ -1431,6 +1431,18 @@ function detectPlatform(rawUrl) {
   return match ? { name: match[0], host, icon: match[2] } : { name: "通用网页", host, icon: "↗" };
 }
 
+async function resolvePlatformUrl(cleanUrl, platform, request = requestUrl) {
+  if (platform.name !== '哔哩哔哩' || parseHttpUrl(cleanUrl).hostname !== 'b23.tv') return cleanUrl;
+  const response = await request(cleanUrl, {method:'HEAD',timeout:12000});
+  const target = parseHttpUrl(response.finalUrl);
+  if (!isSameOrSubdomain(target.hostname,'bilibili.com')) throw new Error('分享链接没有指向 B 站视频');
+  const ids=extractBilibiliId(target.href);
+  if (!ids) return target.href;
+  const canonical = new URL(ids.bvid ? `https://www.bilibili.com/video/${ids.bvid}/` : `https://www.bilibili.com/video/av${ids.aid}/`);
+  const page=target.searchParams.get('p');if(page&&/^\d+$/.test(page)&&Number(page)>1)canonical.searchParams.set('p',page);
+  return canonical.href;
+}
+
 async function buildResults(rawUrl) {
   const parsed = parseHttpUrl(rawUrl);
   // Validate before invoking yt-dlp or any platform fallback so subprocesses
@@ -1478,13 +1490,14 @@ async function buildResults(rawUrl) {
     };
   }
 
+  const extractorUrl = await resolvePlatformUrl(cleanUrl,platform).catch(() => cleanUrl);
   let platformExtractorError = "";
   if (["X / Twitter", "Pinterest", "Vimeo"].includes(platform.name)) {
     const embedded = await extractPublicPlatform(cleanUrl,platform,sourceDetail,{requestUrl,fetchJson}).catch(() => null);
     if (embedded) return embedded;
   }
   if (platform.name === "哔哩哔哩") {
-    const bilibiliResult = await extractBilibili(cleanUrl, platform, sourceDetail).catch((err) => ({
+    const bilibiliResult = await extractBilibili(extractorUrl, platform, sourceDetail).catch((err) => ({
       error: err.message,
       extractor: "bilibili-api"
     }));
@@ -1502,7 +1515,7 @@ async function buildResults(rawUrl) {
   }
 
   const [extractorInfo, pageDetails, tiktokFallback, sharedFallback] = await Promise.all([
-    platform.name === "通用网页" ? Promise.resolve(null) : runYtDlp(cleanUrl),
+    platform.name === "通用网页" ? Promise.resolve(null) : runYtDlp(extractorUrl),
     fetchPageDetails(cleanUrl),
     isTikTokLikeUrl(cleanUrl)
       ? extractTikwm(cleanUrl, platform, sourceDetail).catch(() => null)
@@ -1814,6 +1827,7 @@ module.exports = {
   normalizeExtractorResults,
   buildYtDlpArgs,
   runJsonCommand,
+  resolvePlatformUrl,
   buildResults,
   buildResultsCached
 };

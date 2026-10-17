@@ -47,3 +47,9 @@ test('DASH-only video becomes a complete save action without hiding original tra
  const r=backend.normalizeExtractorResults({title:'Two tracks',formats:[{url:'https://cdn.example/v.mp4',ext:'mp4',vcodec:'h264',acodec:'none',height:720},{url:'https://cdn.example/a.m4a',ext:'m4a',vcodec:'none',acodec:'aac'}]},'https://www.instagram.com/reel/test',{name:'Instagram'},{});
  assert.ok(r.items.some(i=>i.mediaMode==='combined'&&i.audioUrl));assert.ok(r.items.some(i=>i.mediaMode==='video-only'));assert.ok(r.items.some(i=>i.mediaMode==='audio-only'));
 });
+
+test('every Bilibili extractor receives the expanded canonical URL, preserving the selected part',async()=>{
+ const target=await backend.resolvePlatformUrl('https://b23.tv/Ql06ish',{name:'哔哩哔哩'},async()=>({finalUrl:'https://www.bilibili.com/video/BV1f9NJ6vEYs/?p=2&tracking=ignored'}));
+ assert.equal(target,'https://www.bilibili.com/video/BV1f9NJ6vEYs/?p=2');
+ await assert.rejects(backend.resolvePlatformUrl('https://b23.tv/Ql06ish',{name:'哔哩哔哩'},async()=>({finalUrl:'https://example.com/video/BV1f9NJ6vEYs/'})));
+});
