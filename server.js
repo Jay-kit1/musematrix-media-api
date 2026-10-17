@@ -337,6 +337,9 @@ function getProxyHeadersForHost(hostname) {
   } else if (host.includes("googlevideo.com") || host.includes("ytimg.com")) {
     headers["Referer"] = "https://www.youtube.com/";
     headers["Origin"] = "https://www.youtube.com";
+  } else if (host.includes("weibocdn.com") || host.includes("sinaimg.cn")) {
+    headers["Referer"] = "https://weibo.com/";
+    headers["Origin"] = "https://weibo.com";
   }
 
   return headers;

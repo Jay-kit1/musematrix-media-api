@@ -53,3 +53,7 @@ test('every Bilibili extractor receives the expanded canonical URL, preserving t
  assert.equal(target,'https://www.bilibili.com/video/BV1f9NJ6vEYs/?p=2');
  await assert.rejects(backend.resolvePlatformUrl('https://b23.tv/Ql06ish',{name:'哔哩哔哩'},async()=>({finalUrl:'https://example.com/video/BV1f9NJ6vEYs/'})));
 });
+
+test('Weibo media saves preserve the source Referer required by its CDN',()=>{
+ assert.equal(backend.getProxyHeadersForHost('f.video.weibocdn.com').Referer,'https://weibo.com/');
+});
