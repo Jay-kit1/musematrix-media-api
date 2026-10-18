@@ -76,8 +76,8 @@ test('Douyin expands a short share to its clean public share page before extract
   assert.equal(options.followRedirects,false);
   return {finalUrl:_url,headers:{location:'https://www.iesdouyin.com/share/video/7665672488277331209/?did=tracking&share_sign=tracking'}};
  });
- assert.equal(url,'https://www.iesdouyin.com/share/video/7665672488277331209/');
- assert.equal(backend.getDouyinShareCandidates('https://v.douyin.com/aKNXWqFB5mE/',{webpage_url:url})[0],'https://www.iesdouyin.com/share/video/7665672488277331209');
+ assert.equal(url,'https://www.douyin.com/video/7665672488277331209');
+ assert.equal(backend.getDouyinShareCandidates('https://v.douyin.com/aKNXWqFB5mE/',{webpage_url:url})[0],'https://www.douyin.com/share/video/7665672488277331209/');
 });
 
 test('public share JSON parses across whitespace variants without executing JavaScript',()=>{

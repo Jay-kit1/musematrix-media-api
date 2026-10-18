@@ -714,7 +714,7 @@ function isTikTokLikeUrl(cleanUrl) {
 function getDouyinShareCandidates(cleanUrl, extractorInfo = {}) {
   const awemeId = extractDouyinAwemeId(cleanUrl, extractorInfo);
   const candidates = awemeId
-    ? [`https://www.iesdouyin.com/share/video/${awemeId}`, cleanUrl]
+    ? [`https://www.douyin.com/share/video/${awemeId}/`, `https://www.iesdouyin.com/share/video/${awemeId}/`]
     : [cleanUrl];
   return [...new Set(candidates)];
 }
@@ -1344,7 +1344,7 @@ async function resolvePlatformUrl(cleanUrl, platform, request = requestUrl) {
     const target=parseHttpUrl(new URL(response.headers?.location||response.finalUrl,cleanUrl).href);
     if(!['douyin.com','iesdouyin.com','amemv.com'].some(domain=>isSameOrSubdomain(target.hostname,domain)))throw new Error('分享链接没有指向抖音作品');
     const id=extractDouyinAwemeId(target.href);
-    return id?`https://www.iesdouyin.com/share/video/${id}/`:target.href;
+    return id?`https://www.douyin.com/video/${id}`:target.href;
   }
   if (platform.name !== '哔哩哔哩' || parseHttpUrl(cleanUrl).hostname !== 'b23.tv') return cleanUrl;
   const response = await request(cleanUrl, {method:'HEAD',timeout:12000});

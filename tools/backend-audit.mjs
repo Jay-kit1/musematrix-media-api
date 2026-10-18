@@ -70,8 +70,8 @@ assert.deepEqual(
     error: "ERROR: [Douyin] 7673729708105714980: Fresh cookies are needed"
   }),
   [
-    "https://www.iesdouyin.com/share/video/7673729708105714980",
-    "https://v.douyin.com/K8ebVWVxWiU/"
+    "https://www.douyin.com/share/video/7673729708105714980/",
+    "https://www.iesdouyin.com/share/video/7673729708105714980/"
   ]
 );
 assert.equal(
