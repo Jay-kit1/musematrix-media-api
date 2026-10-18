@@ -12,6 +12,7 @@ const { execFile } = require("child_process");
 const { extractPublicPlatform } = require("./lib/public-platforms.js");
 const {getDouyinShareItemFromHtml,buildDouyinShareResult}=require("./lib/douyin-share.cjs");
 const {extractDouyinFeed}=require("./lib/douyin-feed.cjs");
+const {extractXiaohongshu}=require("./lib/xiaohongshu.cjs");
 
 
 const publicDir = path.join(__dirname, "public");
@@ -1407,6 +1408,10 @@ async function buildResults(rawUrl) {
 
   const extractorUrl = await resolvePlatformUrl(cleanUrl,platform).catch(() => cleanUrl);
   let platformExtractorError = "";
+  if (platform.name === '小红书') {
+    const noteResult = await extractXiaohongshu(cleanUrl,platform,sourceDetail,{requestUrl});
+    if (noteResult) return noteResult;
+  }
   if (["X / Twitter", "Pinterest", "Vimeo", "快手"].includes(platform.name)) {
     const embedded = await extractPublicPlatform(cleanUrl,platform,sourceDetail,{requestUrl,fetchJson}).catch(() => null);
     if (embedded) return embedded;
