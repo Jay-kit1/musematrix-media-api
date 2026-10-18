@@ -11,6 +11,7 @@ const { mergedFile, prepareMergedFile } = require("./lib/merge-media.js");
 const { execFile } = require("child_process");
 const { extractPublicPlatform } = require("./lib/public-platforms.js");
 const {getDouyinShareItemFromHtml,buildDouyinShareResult}=require("./lib/douyin-share.cjs");
+const {extractDouyinFeed}=require("./lib/douyin-feed.cjs");
 
 
 const publicDir = path.join(__dirname, "public");
@@ -1422,6 +1423,13 @@ async function buildResults(rawUrl) {
   }
 
   if (platform.name === "抖音 / TikTok" && isDouyinLikeUrl(cleanUrl)) {
+    const feedResult = await extractDouyinFeed(extractDouyinAwemeId(extractorUrl), cleanUrl, platform, sourceDetail, {
+      fetchJson: async (url, headers) => {
+        const response = await requestUrl(url, {limit:maxRemoteJsonBytes,timeout:6000,headers});
+        return JSON.parse(response.body || '{}');
+      }
+    });
+    if (feedResult) return feedResult;
     const douyinShareResult = await extractDouyinShareHtml(cleanUrl, platform, sourceDetail,{webpage_url:extractorUrl}).catch(() => null);
     if (douyinShareResult) {
       return douyinShareResult;

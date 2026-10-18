@@ -1,6 +1,29 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import backend from '../server.js';
+import douyinFeed from '../lib/douyin-feed.cjs';
+
+test('public Douyin feed rejects unrelated recommendations and uses its next node',async()=>{
+ const id='7665672488277331209';const calls=[];
+ const requested={aweme_id:id,desc:'Requested SCI video',video:{width:2160,height:3840,duration:120740,play_addr:{width:720,height:1280,data_size:16425328,url_list:['https://v.douyinvod.com/requested.mp4']}}};
+ const io={fetchJson:async(url)=>{calls.push(url);return {status_code:0,aweme_list:[calls.length===1?{...requested,aweme_id:'1111111111111111111'}:requested]}}};
+ const r=await douyinFeed.extractDouyinFeed(id,'https://v.douyin.com/aKNXWqFB5mE/',{name:'抖音 / TikTok'},{},io);
+ assert.equal(calls.length,2);assert.equal(r.sourceDetail.extractor,'douyin-public-feed');assert.equal(r.sourceDetail.awemeId,id);assert.equal(r.items[0].quality,'720p');assert.equal(r.items[0].size,16425328);assert.match(r.items[0].label,/720x1280/);
+});
+
+test('empty or unavailable Douyin feed never succeeds with another work or a cover',async()=>{
+ const id='7665672488277331209';
+ for(const data of [{status_code:0,aweme_list:[{aweme_id:'1111111111111111111',video:{play_addr:{url_list:['https://v.douyinvod.com/wrong.mp4']}}}]},{status_code:0,aweme_list:[{aweme_id:id,video:{cover:{url_list:['https://example.com/a.jpg']}}}]},{status_code:9,aweme_list:[]}]){
+  assert.equal(await douyinFeed.extractDouyinFeed(id,'https://www.douyin.com/video/'+id,{name:'抖音 / TikTok'},{},{fetchJson:async()=>data}),null);
+ }
+});
+
+test('public Douyin feed tolerates one failed node with bounded fallback',async()=>{
+ let calls=0;const id='7665672488277331209';
+ const io={fetchJson:async()=>{calls++;if(calls===1)throw new Error('timeout');return {aweme_list:[{aweme_id:id,video:{play_addr:{url_list:['https://v.douyinvod.com/valid.mp4']}}}]}}};
+ const r=await douyinFeed.extractDouyinFeed(id,'https://www.douyin.com/video/'+id,{name:'抖音 / TikTok'},{},io);
+ assert.equal(calls,2);assert.equal(r.sourceDetail.extractor,'douyin-public-feed');
+});
 
 test('Bilibili short share resolves before IDs are parsed and provides an audio-video file', async()=>{
  const calls=[];
