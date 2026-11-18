@@ -14,6 +14,7 @@ const { extractPublicPlatform } = require("./lib/public-platforms.js");
 const {getDouyinShareItemFromHtml,buildDouyinShareResult}=require("./lib/douyin-share.cjs");
 const {extractDouyinFeed}=require("./lib/douyin-feed.cjs");
 const {extractXiaohongshu}=require("./lib/xiaohongshu.cjs");
+const { validateYouTubeMedia } = require("./lib/youtube-media.js");
 
 
 const publicDir = path.join(__dirname, "public");
@@ -450,30 +451,28 @@ async function requestUrl(targetUrl, options = {}) {
 
       const chunks = [];
       let received = 0;
-      remoteRes.on("data", (chunk) => {
-        if (settled) return;
-        received += chunk.length;
-        if (received <= limit) {
-          chunks.push(chunk);
-        } else {
-          remoteRes.destroy();
-          finishResolve({
-            finalUrl: parsed.toString(),
-            statusCode: remoteRes.statusCode,
-            headers: remoteRes.headers,
-            body: Buffer.concat(chunks).toString("utf8"),
-            truncated: true
-          });
-        }
-      });
-      remoteRes.on("end", () => {
-        finishResolve({
-          finalUrl: parsed.toString(),
+      const response = (truncated = false) => {
+        const bytes = Buffer.concat(chunks);
+        return {
+          finalUrl: parsed.href,
           statusCode: remoteRes.statusCode,
           headers: remoteRes.headers,
-          body: Buffer.concat(chunks).toString("utf8")
-        });
+          body: options.binary ? "" : bytes.toString("utf8"),
+          ...(options.binary ? { bodyBytes: bytes } : {}),
+          ...(truncated ? { truncated: true } : {})
+        };
+      };
+      remoteRes.on("data", (chunk) => {
+        if (settled) return;
+        const remaining = limit - received;
+        if (remaining > 0) chunks.push(chunk.subarray(0, remaining));
+        received += chunk.length;
+        if (received > limit) {
+          finishResolve(response(true));
+          remoteRes.destroy();
+        }
       });
+      remoteRes.on("end", () => finishResolve(response()));
       remoteRes.on("error", finishReject);
     });
 
@@ -1336,7 +1335,7 @@ function detectPlatform(rawUrl) {
     ["哔哩哔哩", ["bilibili.com", "b23.tv"], "B"],
     ["X / Twitter", ["x.com", "twitter.com"], "X"],
     ["Pinterest", ["pinterest.com", "pinterest.ca", "pin.it"], "P"],
-    ["小红书", ["xiaohongshu.com", "xhslink.com"], "红"],
+    ["小红书", ["xiaohongshu.com", "xhslink.com", "xhslink.cn"], "红"],
     ["快手", ["kuaishou.com", "gifshow.com"], "快"],
     ["微博", ["weibo.com", "weibo.cn"], "微"],
     ["Facebook", ["facebook.com", "fb.watch"], "f"],
@@ -1442,8 +1441,12 @@ async function buildResults(rawUrl) {
   const platformJson = (url, headers) => fetchJson(url, headers, platformRequest);
   const extractorUrl = await resolvePlatformUrl(cleanUrl, platform, platformRequest).catch(() => cleanUrl);
   let platformExtractorError = "";
+  let noteAccessIssue = "";
   if (platform.name === '小红书') {
-    const noteResult = await extractXiaohongshu(cleanUrl, platform, sourceDetail, {requestUrl: platformRequest});
+    const noteResult = await extractXiaohongshu(cleanUrl, platform, sourceDetail, {
+      requestUrl: platformRequest,
+      reportAccessIssue: issue => { noteAccessIssue = issue; }
+    });
     if (noteResult) return noteResult;
   }
   if (["X / Twitter", "Pinterest", "Vimeo", "快手"].includes(platform.name)) {
@@ -1480,9 +1483,23 @@ async function buildResults(rawUrl) {
 
   const knownMediaPlatform = platform.name !== "通用网页";
   let extractorInfo;
-  if (knownMediaPlatform) {
+  let unusableMedia = false;
+  const validateMedia = async (candidate, signal) => {
+    if (!candidate || platform.name !== "YouTube") return candidate;
+    const request = scopedRequest(signal, 3500);
+    const verified = await validateYouTubeMedia(candidate, url => request(url, {
+      binary: true,
+      limit: 128,
+      headers: { ...getProxyHeadersForHost(new URL(url).hostname), Range: "bytes=0-127" }
+    }));
+    if (!verified) unusableMedia = true;
+    return verified;
+  };
+  if (knownMediaPlatform && !noteAccessIssue) {
     const alternates = {
-      shared: signal => extractSnapAny(cleanUrl, platform, sourceDetail, scopedRequest(signal, 17000))
+      shared: async signal => validateMedia(
+        await extractSnapAny(cleanUrl, platform, sourceDetail, scopedRequest(signal, 17000)), signal
+      )
     };
     if (isTikTokLikeUrl(cleanUrl)) {
       alternates.tiktok = signal => extractTikwm(cleanUrl, platform, sourceDetail, scopedRequest(signal, 9000));
@@ -1499,7 +1516,7 @@ async function buildResults(rawUrl) {
           extractDouyinAwemeId(cleanUrl, extractorInfo || {})) {
           result = await extractDouyinShareHtml(cleanUrl, platform, sourceDetail, extractorInfo, request);
         }
-        return { result };
+        return { result: await validateMedia(result, signal) };
       },
       alternates,
       combine: results => {
@@ -1513,7 +1530,7 @@ async function buildResults(rawUrl) {
     });
     if (media) return media;
   }
-  const pageDetails = await fetchPageDetails(cleanUrl, scopedRequest(budget, knownMediaPlatform ? 2200 : 8000));
+  const pageDetails = noteAccessIssue ? {} : await fetchPageDetails(cleanUrl, scopedRequest(budget, knownMediaPlatform ? 2200 : 8000));
   const detailItems = [
     {
       label: "原始链接",
@@ -1542,14 +1559,18 @@ async function buildResults(rawUrl) {
   }
 
   const rawExtractorError = platformExtractorError || (extractorInfo && extractorInfo.error ? extractorInfo.error : "");
-  const friendlyExtractorError = explainExtractorError(rawExtractorError);
+  const friendlyExtractorError = noteAccessIssue ||
+    (unusableMedia ? "YouTube 返回的媒体地址无法下载，请稍后重新提取。" : "") ||
+    (budget.aborted ? "媒体提取超时，请稍后重试。" : "") ||
+    explainExtractorError(rawExtractorError);
   const failedItems = knownMediaPlatform ? [] : detailItems;
 
   return {
     url: cleanUrl,
     platform,
     success: false,
-    status: budget.aborted ? "timeout" : friendlyExtractorError ? "extractor_blocked" : "no_media",
+    status: noteAccessIssue ? "source_access_restricted" : unusableMedia ? "upstream_media_unavailable" :
+      budget.aborted ? "timeout" : friendlyExtractorError ? "extractor_blocked" : "no_media",
     title: pageDetails.title || (knownMediaPlatform ? `${platform.name} 解析未完成` : `${platform.name} 链接详情已识别`),
     note: (budget.aborted ? "媒体提取超时，请稍后重试。" : "") || pageDetails.description || friendlyExtractorError || (getYtDlpPath()
       ? "已完成来源识别和网页详情读取，但当前链接没有返回可用媒体格式。"

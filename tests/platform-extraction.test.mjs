@@ -115,6 +115,22 @@ test('Kuaishou public share state yields actual MP4 URLs without executing page 
  const d=publicPlatforms.buildKuaishouPublic(html,'https://www.kuaishou.com/short-video/public',{name:'快手'},{});
  assert.equal(d.items[0].mediaMode,'combined');assert.equal(d.sourceDetail.title,'Public travel video');
 });
+test('Kuaishou original web link starts with its mobile page and rejects a different work', async () => {
+  const url = 'https://www.kuaishou.com/short-video/3xdjgkviwhyyhas?shareToken=example';
+  const html = '<script>window.INIT_STATE={"primary":{"photo":{"mainMvUrls":[{"url":"https://txmov2.a.kwimgs.com/video.mp4"}]}}};</script>';
+  const calls = [];
+  const result = await publicPlatforms.extractPublicPlatform(url, { name: '快手' }, {}, {
+    async requestUrl(target) {
+      calls.push(target);
+      return { statusCode: 200, body: html, finalUrl: calls.length === 1
+        ? 'https://m.gifshow.com/fw/photo/different'
+        : 'https://m.gifshow.com/fw/photo/3xdjgkviwhyyhas' };
+    }
+  });
+  assert.deepEqual(calls, ['https://m.gifshow.com/fw/photo/3xdjgkviwhyyhas?shareToken=example', url]);
+  assert.equal(result.url, url);
+  assert.equal(result.items[0].mediaMode, 'combined');
+});
 
 test('Douyin expands a short share to its clean public share page before extraction',async()=>{
  const url=await backend.resolvePlatformUrl('https://v.douyin.com/aKNXWqFB5mE/',{name:'抖音 / TikTok'},async(_url,options)=>{
