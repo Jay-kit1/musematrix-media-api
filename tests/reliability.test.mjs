@@ -182,3 +182,26 @@ test('a stalled merge input has a total deadline and releases its stream',async(
  https.get=(_url,_options,callback)=>{const remote=new Readable({read(){}});remote.statusCode=200;remote.headers={'content-length':'12'};const req=new Readable({read(){}});process.nextTick(()=>callback(remote));return req;};
  try{await assert.rejects(backend.downloadTrackToFile('https://cdn.example/stalled.mp4',join(dir,'v.mp4'),1024,Date.now()+30),/时限/);}finally{https.get=originalGet;dns.promises.lookup=originalLookup;await rm(dir,{recursive:true,force:true});}
 });
+
+test('polling an unknown preparation never starts a new media download', async () => {
+  const originalLookup = dns.promises.lookup;
+  let lookups = 0;
+  dns.promises.lookup = async () => {
+    lookups++;
+    throw new Error('Unexpected lookup for a status-only request');
+  };
+  await new Promise(resolve => backend.server.listen(0, '127.0.0.1', resolve));
+  try {
+    const params = new URLSearchParams({
+      url: 'https://example.com/v.mp4', audio: 'https://example.com/a.m4a', prepare: 'status'
+    });
+    const response = await fetch(`http://127.0.0.1:${backend.server.address().port}/api/download?${params}`);
+    const result = await response.json();
+    assert.equal(response.status, 502);
+    assert.equal(result.status, 'failed');
+    assert.equal(lookups, 0);
+  } finally {
+    dns.promises.lookup = originalLookup;
+    await new Promise(resolve => backend.server.close(resolve));
+  }
+});

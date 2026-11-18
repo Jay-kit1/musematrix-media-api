@@ -7,7 +7,8 @@ const net = require("net");
 const crypto = require("crypto");
 const { Transform, pipeline } = require("stream");
 const { pipeline: pipelineAsync } = require("stream/promises");
-const { mergedFile, prepareMergedFile } = require("./lib/merge-media.js");
+const { mergedFile, prepareMergedFile, getMergedPreparation } = require("./lib/merge-media.js");
+const { waitWithin, chooseFallback, hasCompleteVideo } = require("./lib/extraction-budget.js");
 const { execFile } = require("child_process");
 const { extractPublicPlatform } = require("./lib/public-platforms.js");
 const {getDouyinShareItemFromHtml,buildDouyinShareResult}=require("./lib/douyin-share.cjs");
@@ -25,6 +26,7 @@ const defaultMaxDownloadBytes = 1024 * 1024 * 1024 * 2;
 const maxDownloadBytes = resolveDownloadLimit(process.env.MAX_DOWNLOAD_BYTES);
 const maxProxyDownloadBytes = resolveProxyDownloadLimit(process.env.MAX_PROXY_DOWNLOAD_BYTES);
 const extractorTimeoutMs = Number(process.env.EXTRACTOR_TIMEOUT_MS || 45000);
+const parseBudgetMs = 36000;
 const downloadTimeoutMs = Number(process.env.DOWNLOAD_TIMEOUT_MS || 30000);
 const parseCacheTtlMs = Number(process.env.PARSE_CACHE_TTL_MS || 90000);
 const corsOrigin = process.env.CORS_ORIGIN || "*";
@@ -371,10 +373,15 @@ function explainExtractorError(errorText) {
 
 async function requestUrl(targetUrl, options = {}) {
   const parsed = parseHttpUrl(targetUrl);
-  const resolved = await assertPublicUrl(parsed);
   const limit = options.limit || maxMetadataBytes;
   const timeout = options.timeout || 10000;
   const deadlineAt = options.deadlineAt || Date.now() + timeout;
+  const remaining = deadlineAt - Date.now();
+  if (remaining <= 0) throw new Error("请求目标网站超过总时限");
+  const timeoutSignal = AbortSignal.timeout(remaining);
+  const signal = options.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
+  const resolved = await waitWithin(() => assertPublicUrl(parsed), signal);
+  signal.throwIfAborted();
   const method = options.method || "GET";
   const requestBody = typeof options.body === "string" || Buffer.isBuffer(options.body)
     ? options.body
@@ -414,6 +421,7 @@ async function requestUrl(targetUrl, options = {}) {
     req = client.request(parsed, {
       method,
       timeout: Math.min(timeout, hardTimeout),
+      signal,
       headers,
       lookup: createPinnedLookup(resolved)
     }, (remoteRes) => {
@@ -505,9 +513,9 @@ function absoluteUrl(value, baseUrl) {
   }
 }
 
-async function fetchPageDetails(cleanUrl) {
+async function fetchPageDetails(cleanUrl, request = requestUrl) {
   try {
-    const response = await requestUrl(cleanUrl);
+    const response = await request(cleanUrl);
     const contentType = String(response.headers["content-type"] || "");
     const html = response.body || "";
 
@@ -571,7 +579,7 @@ function buildYtDlpArgs(cleanUrl) {
   return args;
 }
 
-function runJsonCommand(executable, args, timeoutMs) {
+function runJsonCommand(executable, args, timeoutMs, signal) {
   return new Promise((resolve) => {
     let settled = false;
     let timer;
@@ -585,7 +593,9 @@ function runJsonCommand(executable, args, timeoutMs) {
     let child;
     try {
       child = execFile(executable, args, {
-        maxBuffer: 1024 * 1024 * 12
+        maxBuffer: 1024 * 1024 * 12,
+        signal,
+        killSignal: "SIGKILL"
       }, (err, stdout, stderr) => {
         if (err || !stdout) {
           const detail = String(stderr || (err && err.message) || "提取器没有返回内容").trim().slice(-4000);
@@ -628,13 +638,13 @@ function runJsonCommand(executable, args, timeoutMs) {
   });
 }
 
-function runYtDlp(cleanUrl) {
+function runYtDlp(cleanUrl, signal) {
   const ytdlp = getYtDlpPath();
   if (!ytdlp) {
     return Promise.resolve(null);
   }
 
-  return runJsonCommand(ytdlp, buildYtDlpArgs(cleanUrl), extractorTimeoutMs);
+  return runJsonCommand(ytdlp, buildYtDlpArgs(cleanUrl), extractorTimeoutMs, signal);
 }
 
 function extractBilibiliId(cleanUrl) {
@@ -669,14 +679,17 @@ function extractDouyinAwemeId(cleanUrl, extractorInfo = {}) {
   return "";
 }
 
-async function fetchJson(targetUrl, headers = {}) {
-  const response = await requestUrl(targetUrl, {
+async function fetchJson(targetUrl, headers = {}, request = requestUrl) {
+  const response = await request(targetUrl, {
     limit: maxRemoteJsonBytes,
     headers: {
       "Accept": "application/json,text/plain,*/*",
       ...headers
     }
   });
+  if (response.statusCode < 200 || response.statusCode >= 300 || response.truncated) {
+    throw new Error("目标接口未返回完整 JSON");
+  }
   return JSON.parse(response.body || "{}");
 }
 
@@ -786,10 +799,10 @@ function buildSnapAnyResult(apiResponse, cleanUrl, platform, sourceDetail) {
     sourceDetail:{...sourceDetail,extractor:'snapany-fallback',title,awemeId:apiResponse.id || '',thumbnail:previewUrl},items:items.slice(0,20)};
 }
 
-async function extractSnapAny(cleanUrl, platform, sourceDetail) {
+async function extractSnapAny(cleanUrl, platform, sourceDetail, request = requestUrl) {
   if (platform.name === '通用网页') return null;
   const body = JSON.stringify({link:cleanUrl});
-  const response = await requestUrl('https://api.snapany.com/v1/extract/post', {
+  const response = await request('https://api.snapany.com/v1/extract/post', {
     method:'POST',body,limit:maxRemoteJsonBytes,timeout:20000,
     headers:{...buildSnapAnyHeaders(cleanUrl),'Content-Length':Buffer.byteLength(body)}
   });
@@ -829,6 +842,7 @@ function buildTikwmResult(apiResponse, cleanUrl, platform, sourceDetail) {
     url: videoUrl,
     ext: "mp4",
     size: Number(data.size || data.hd_size || 0),
+    mediaMode: "combined",
     headers: commonHeaders
   });
   if (/^https?:\/\//.test(data.music || "")) {
@@ -862,14 +876,14 @@ function buildTikwmResult(apiResponse, cleanUrl, platform, sourceDetail) {
   };
 }
 
-async function extractTikwm(cleanUrl, platform, sourceDetail) {
+async function extractTikwm(cleanUrl, platform, sourceDetail, request = requestUrl) {
   if (!isTikTokLikeUrl(cleanUrl)) return null;
   const endpoint = `https://www.tikwm.com/api/?url=${encodeURIComponent(cleanUrl)}&hd=1`;
   const data = await fetchJson(endpoint, {
     "User-Agent": browserUserAgent,
     "Accept": "application/json,text/plain,*/*",
     "Referer": "https://www.tikwm.com/"
-  });
+  }, request);
   return buildTikwmResult(data, cleanUrl, platform, sourceDetail);
 }
 
@@ -895,12 +909,12 @@ function mergeTikTokFallback(result, fallback) {
   };
 }
 
-async function extractDouyinShareHtml(cleanUrl, platform, sourceDetail, extractorInfo = {}) {
+async function extractDouyinShareHtml(cleanUrl, platform, sourceDetail, extractorInfo = {}, request = requestUrl) {
   if (!isDouyinLikeUrl(cleanUrl)) return null;
 
   for (const candidate of getDouyinShareCandidates(cleanUrl, extractorInfo)) {
     try {
-      const response = await requestUrl(candidate, {
+      const response = await request(candidate, {
         limit: maxRemoteJsonBytes,
         timeout: 15000,
         headers: {
@@ -944,7 +958,7 @@ function buildDouyinMusicItem(detail, referer) {
   };
 }
 
-async function extractDouyinMusic(cleanUrl, extractorInfo = {}) {
+async function extractDouyinMusic(cleanUrl, extractorInfo = {}, request = requestUrl) {
   const awemeId = extractDouyinAwemeId(cleanUrl, extractorInfo);
   if (!awemeId) return null;
 
@@ -954,7 +968,7 @@ async function extractDouyinMusic(cleanUrl, extractorInfo = {}) {
     "User-Agent": browserUserAgent,
     "Referer": referer,
     "Accept": "application/json,text/plain,*/*"
-  });
+  }, request);
 
   if (detail.status_code !== 0 || !detail.aweme_detail) {
     return null;
@@ -963,7 +977,7 @@ async function extractDouyinMusic(cleanUrl, extractorInfo = {}) {
   return buildDouyinMusicItem(detail, referer);
 }
 
-async function addPlatformExtraItems(result, cleanUrl, platform, extractorInfo = {}) {
+async function addPlatformExtraItems(result, cleanUrl, platform, extractorInfo = {}, request = requestUrl) {
   if (!result || !Array.isArray(result.items)) return result;
 
   if (
@@ -971,7 +985,7 @@ async function addPlatformExtraItems(result, cleanUrl, platform, extractorInfo =
     isDouyinLikeUrl(cleanUrl) &&
     !result.items.some((item) => item.type === "音频")
   ) {
-    const musicItem = await extractDouyinMusic(cleanUrl, extractorInfo).catch(() => null);
+    const musicItem = await extractDouyinMusic(cleanUrl, extractorInfo, request).catch(() => null);
     if (musicItem) {
       const items = [...result.items];
       const insertIndex = items[0] && items[0].type === "图片" ? 1 : 0;
@@ -999,7 +1013,13 @@ async function extractBilibili(cleanUrl, platform, sourceDetail, io = {requestUr
 
 async function readTrackChunk(targetUrl, filePath, limit, offset, expectedTotal, etag, deadlineAt, redirectCount=0) {
   const parsed = parseHttpUrl(targetUrl);
-  const resolved = await assertPublicUrl(parsed);
+  const remaining = deadlineAt - Date.now();
+  if (remaining <= 0) throw new Error('媒体轨道读取超过总时限');
+  const resolved = await waitWithin(() => assertPublicUrl(parsed), AbortSignal.timeout(Math.min(remaining, 4000)))
+    .catch(error => {
+      if (error.name === 'TimeoutError') throw new Error('媒体轨道 DNS 解析超时');
+      throw error;
+    });
   const client = parsed.protocol === 'https:' ? https : http;
   const end=Math.min(offset+4*1024*1024-1,limit-1);
   const headers={...getProxyHeadersForHost(parsed.hostname),Range:`bytes=${offset}-${end}`};
@@ -1019,6 +1039,9 @@ async function readTrackChunk(targetUrl, filePath, limit, offset, expectedTotal,
           remote.resume();if(redirectCount>=4)throw new Error('资源重定向过多');
           clearTimeout(hardTimer);
           const value=await readTrackChunk(new URL(remote.headers.location,parsed).href,filePath,limit,offset,expectedTotal,etag,deadlineAt,redirectCount+1);finish(null,value);return;
+        }
+        if (etag && remote.headers.etag && remote.headers.etag !== etag) {
+          throw new Error('媒体轨道在分段读取期间发生变化，请重新提取。');
         }
         let total=Number(remote.headers['content-length']||0),partial=remote.statusCode===206,expectedBytes=total;
         if(partial){
@@ -1061,7 +1084,8 @@ function createDownloadLimiter(limit = maxDownloadBytes) {
 
 async function proxyRemoteFile(targetUrl, filename, res, redirectCount = 0, clientRange = "", ifRange = "") {
   const parsed = parseHttpUrl(targetUrl);
-  const resolved = await assertPublicUrl(parsed);
+  const resolved = await waitWithin(() => assertPublicUrl(parsed), AbortSignal.timeout(4000));
+  if (res.destroyed) return;
 
   const client = parsed.protocol === "https:" ? https : http;
   let completed = false;
@@ -1360,10 +1384,17 @@ async function resolvePlatformUrl(cleanUrl, platform, request = requestUrl) {
 }
 
 async function buildResults(rawUrl) {
+  const budget = AbortSignal.timeout(parseBudgetMs);
+  const scopedRequest = (signal, limit) => (url, options = {}) => requestUrl(url, {
+    ...options,
+    timeout: Math.min(options.timeout || 10000, limit),
+    signal
+  });
+  const withBudget = (ms) => AbortSignal.any([budget, AbortSignal.timeout(ms)]);
   const parsed = parseHttpUrl(rawUrl);
   // Validate before invoking yt-dlp or any platform fallback so subprocesses
   // cannot become an SSRF bypass around the HTTP helper's DNS checks.
-  await assertPublicUrl(parsed);
+  await waitWithin(() => assertPublicUrl(parsed), withBudget(4000));
   const platform = detectPlatform(rawUrl);
   const ext = platform.extension || getExtension(parsed.pathname);
   const directKind = platform.kind || getMediaKind(ext);
@@ -1381,7 +1412,7 @@ async function buildResults(rawUrl) {
   };
 
   if (platform.direct) {
-    const head = await requestUrl(cleanUrl, { method: "HEAD" }).catch(() => null);
+    const head = await scopedRequest(budget, 1800)(cleanUrl, { method: "HEAD" }).catch(() => null);
     const contentType = head ? String(head.headers["content-type"] || "") : "";
     const contentLength = head ? Number(head.headers["content-length"] || 0) : 0;
     return {
@@ -1406,18 +1437,25 @@ async function buildResults(rawUrl) {
     };
   }
 
-  const extractorUrl = await resolvePlatformUrl(cleanUrl,platform).catch(() => cleanUrl);
+  const platformSignal = withBudget(14000);
+  const platformRequest = scopedRequest(platformSignal, 6500);
+  const platformJson = (url, headers) => fetchJson(url, headers, platformRequest);
+  const extractorUrl = await resolvePlatformUrl(cleanUrl, platform, platformRequest).catch(() => cleanUrl);
   let platformExtractorError = "";
   if (platform.name === '小红书') {
-    const noteResult = await extractXiaohongshu(cleanUrl,platform,sourceDetail,{requestUrl});
+    const noteResult = await extractXiaohongshu(cleanUrl, platform, sourceDetail, {requestUrl: platformRequest});
     if (noteResult) return noteResult;
   }
   if (["X / Twitter", "Pinterest", "Vimeo", "快手"].includes(platform.name)) {
-    const embedded = await extractPublicPlatform(cleanUrl,platform,sourceDetail,{requestUrl,fetchJson}).catch(() => null);
+    const embedded = await extractPublicPlatform(cleanUrl, platform, sourceDetail, {
+      requestUrl: platformRequest, fetchJson: platformJson
+    }).catch(() => null);
     if (embedded) return embedded;
   }
   if (platform.name === "哔哩哔哩") {
-    const bilibiliResult = await extractBilibili(extractorUrl, platform, sourceDetail).catch((err) => ({
+    const bilibiliResult = await extractBilibili(extractorUrl, platform, sourceDetail, {
+      requestUrl: platformRequest, fetchJson: platformJson
+    }).catch((err) => ({
       error: err.message,
       extractor: "bilibili-api"
     }));
@@ -1429,48 +1467,53 @@ async function buildResults(rawUrl) {
 
   if (platform.name === "抖音 / TikTok" && isDouyinLikeUrl(cleanUrl)) {
     const feedResult = await extractDouyinFeed(extractDouyinAwemeId(extractorUrl), cleanUrl, platform, sourceDetail, {
-      fetchJson: async (url, headers) => {
-        const response = await requestUrl(url, {limit:maxRemoteJsonBytes,timeout:6000,headers});
-        return JSON.parse(response.body || '{}');
-      }
+      fetchJson: platformJson
     });
     if (feedResult) return feedResult;
-    const douyinShareResult = await extractDouyinShareHtml(cleanUrl, platform, sourceDetail,{webpage_url:extractorUrl}).catch(() => null);
+    const douyinShareResult = await extractDouyinShareHtml(cleanUrl, platform, sourceDetail, {
+      webpage_url: extractorUrl
+    }, platformRequest);
     if (douyinShareResult) {
       return douyinShareResult;
     }
   }
 
-  const [extractorInfo, pageDetails, tiktokFallback, sharedFallback] = await Promise.all([
-    platform.name === "通用网页" ? Promise.resolve(null) : runYtDlp(extractorUrl),
-    fetchPageDetails(cleanUrl),
-    isTikTokLikeUrl(cleanUrl)
-      ? extractTikwm(cleanUrl, platform, sourceDetail).catch(() => null)
-      : Promise.resolve(null),
-    platform.name !== "通用网页" ? extractSnapAny(cleanUrl, platform, sourceDetail).catch(() => null) : Promise.resolve(null)
-  ]);
-  const extracted = normalizeExtractorResults(extractorInfo, cleanUrl, platform, sourceDetail);
-  if (sharedFallback && (!extracted || (!extracted.items.some(item => item.mediaMode === "combined") && sharedFallback.items.some(item => item.mediaMode === "combined")))) return sharedFallback;
-  if (extracted) {
-    const enriched = await addPlatformExtraItems(extracted, cleanUrl, platform, extractorInfo || {});
-    return mergeTikTokFallback(enriched, tiktokFallback);
-  }
-  if (platform.name === "抖音 / TikTok" && isDouyinLikeUrl(cleanUrl)) {
-    const directShareResult = await extractDouyinShareHtml(
-      cleanUrl,
-      platform,
-      sourceDetail,
-      extractorInfo || {}
-    );
-    if (directShareResult) {
-      return directShareResult;
+  const knownMediaPlatform = platform.name !== "通用网页";
+  let extractorInfo;
+  if (knownMediaPlatform) {
+    const alternates = {
+      shared: signal => extractSnapAny(cleanUrl, platform, sourceDetail, scopedRequest(signal, 17000))
+    };
+    if (isTikTokLikeUrl(cleanUrl)) {
+      alternates.tiktok = signal => extractTikwm(cleanUrl, platform, sourceDetail, scopedRequest(signal, 9000));
     }
-
+    const media = await chooseFallback({
+      signal: budget,
+      primary: async signal => {
+        extractorInfo = await runYtDlp(extractorUrl, signal);
+        let result = normalizeExtractorResults(extractorInfo, cleanUrl, platform, sourceDetail);
+        const request = scopedRequest(signal, 1800);
+        if (result) {
+          result = await addPlatformExtraItems(result, cleanUrl, platform, extractorInfo || {}, request);
+        } else if (isDouyinLikeUrl(cleanUrl) && !extractDouyinAwemeId(extractorUrl) &&
+          extractDouyinAwemeId(cleanUrl, extractorInfo || {})) {
+          result = await extractDouyinShareHtml(cleanUrl, platform, sourceDetail, extractorInfo, request);
+        }
+        return { result };
+      },
+      alternates,
+      combine: results => {
+        const primary = results.get("primary")?.result;
+        const shared = results.get("shared");
+        const tiktok = results.get("tiktok");
+        if (hasCompleteVideo(shared) && !hasCompleteVideo(primary)) return shared;
+        if (primary) return mergeTikTokFallback(primary, tiktok);
+        return tiktok || shared;
+      }
+    });
+    if (media) return media;
   }
-  if (tiktokFallback) {
-    return tiktokFallback;
-  }
-  if (sharedFallback) return sharedFallback;
+  const pageDetails = await fetchPageDetails(cleanUrl, scopedRequest(budget, knownMediaPlatform ? 2200 : 8000));
   const detailItems = [
     {
       label: "原始链接",
@@ -1500,16 +1543,15 @@ async function buildResults(rawUrl) {
 
   const rawExtractorError = platformExtractorError || (extractorInfo && extractorInfo.error ? extractorInfo.error : "");
   const friendlyExtractorError = explainExtractorError(rawExtractorError);
-  const knownMediaPlatform = platform.name !== "通用网页";
   const failedItems = knownMediaPlatform ? [] : detailItems;
 
   return {
     url: cleanUrl,
     platform,
     success: false,
-    status: friendlyExtractorError ? "extractor_blocked" : "no_media",
+    status: budget.aborted ? "timeout" : friendlyExtractorError ? "extractor_blocked" : "no_media",
     title: pageDetails.title || (knownMediaPlatform ? `${platform.name} 解析未完成` : `${platform.name} 链接详情已识别`),
-    note: pageDetails.description || friendlyExtractorError || (getYtDlpPath()
+    note: (budget.aborted ? "媒体提取超时，请稍后重试。" : "") || pageDetails.description || friendlyExtractorError || (getYtDlpPath()
       ? "已完成来源识别和网页详情读取，但当前链接没有返回可用媒体格式。"
       : "已完成来源识别和网页详情读取。若要提取多平台真实媒体，请在服务器安装 yt-dlp 或设置 YTDLP_PATH。"),
     sourceDetail: {
@@ -1608,17 +1650,28 @@ const server = http.createServer((req, res) => {
       if(preparation){
         try {
           parseHttpUrl(targetUrl);parseHttpUrl(audioUrl);
-          const state=prepareMergedFile(targetUrl,audioUrl,downloadTrackToFile,preparation==='1');
-          sendJson(res,state.status==='failed'?502:state.status==='ready'?200:202,state);
+          if (preparation !== '1' && preparation !== 'status') {
+            sendJson(res, 400, {error: '无效的准备请求。'});
+            return;
+          }
+          const state = preparation === '1'
+            ? prepareMergedFile(targetUrl, audioUrl, downloadTrackToFile, true)
+            : getMergedPreparation(targetUrl, audioUrl);
+          sendJson(res, state.status === 'failed' ? 502 : state.status === 'ready' ? 200 : 202, state);
         } catch {sendJson(res,400,{error:'媒体地址无效。'});}
         return;
       }
       // Both source URLs go through the same DNS/redirect checks before local-only remuxing.
-      mergedFile(targetUrl,audioUrl,downloadTrackToFile).then(file=>{
+      mergedFile(targetUrl,audioUrl,downloadTrackToFile).then(async file=>{
         if(res.destroyed)return;
         const safeName=String(filename).replace(/[^\w.\-\u4e00-\u9fa5]+/g,'_').slice(0,120);
+        const handle = await fs.promises.open(file.path, 'r');
+        if (res.destroyed) {
+          await handle.close();
+          return;
+        }
         res.writeHead(200,{'Content-Type':'video/mp4','Content-Length':String(file.size),'Content-Disposition':`attachment; filename*=UTF-8''${encodeURIComponent(safeName)}`,'Cache-Control':'no-store'});
-        const stream=fs.createReadStream(file.path);stream.on('error',()=>res.destroy());res.on('close',()=>stream.destroy());stream.pipe(res);
+        pipeline(handle.createReadStream(), res, () => {});
       }).catch(error=>{if(!res.headersSent&&!res.destroyed)sendText(res,error.status||502,'完整视频合并失败，请重新提取后重试，或分别保存音频和视频轨。');});
       return;
     }

@@ -42,6 +42,28 @@ test('Bilibili short share resolves before IDs are parsed and provides an audio-
 test('a cover alone is not a successful video extraction',()=>{
  assert.equal(backend.normalizeExtractorResults({thumbnail:'https://example.com/cover.jpg',formats:[]},'https://www.youtube.com/watch?v=id',{name:'YouTube'},{}),null);
 });
+test('Bilibili sends both format requests together and keeps a complete video when DASH rejects', async () => {
+  let startProgressive, startDash, finishProgressive, failDash;
+  const progressiveStarted = new Promise(resolve => { startProgressive = resolve; });
+  const dashStarted = new Promise(resolve => { startDash = resolve; });
+  const progressive = new Promise(resolve => { finishProgressive = resolve; });
+  const dash = new Promise((_, reject) => { failDash = reject; });
+  const extracting = backend.extractBilibili('https://www.bilibili.com/video/BV1f9NJ6vEYs/', { name: '哔哩哔哩' }, {}, {
+    async fetchJson(url) {
+      if (url.includes('/view?')) return { code: 0, data: { title: 'Public video', cid: 22 } };
+      if (url.includes('fnval=0')) { startProgressive(); return progressive; }
+      startDash();
+      return dash;
+    }
+  });
+  await progressiveStarted;
+  const bothStarted = await Promise.race([dashStarted.then(() => true), new Promise(resolve => setImmediate(() => resolve(false)))]);
+  finishProgressive({ code: 0, data: { durl: [{ url: 'https://cdn.bilivideo.com/full.mp4' }] } });
+  await dashStarted;
+  failDash(new Error('DASH unavailable'));
+  assert.equal((await extracting).items?.[0]?.mediaMode, 'combined');
+  assert.equal(bothStarted, true);
+});
 test('shared fallback keeps the actual platform, title, formats and resource headers',()=>{
  const result=backend.buildSnapAnyResult({site:'bilibili',title:'考研方向',medias:[{media_type:'video',resource_url:'https://cdn.bilivideo.com/full.mp4',headers:{Referer:'https://www.bilibili.com/'},variants:[{video_url:'https://cdn.bilivideo.com/v.m4s',audio_url:'https://cdn.bilivideo.com/a.m4s',quality_label:'1080p',video_ext:'mp4',audio_ext:'m4a'}]}]},'https://b23.tv/Ql06ish',{name:'哔哩哔哩'},{});
  assert.equal(result.platform.name,'哔哩哔哩');assert.equal(result.items[0].headers.Referer,'https://www.bilibili.com/');assert.equal(result.items[0].mediaMode,'combined');assert.equal(result.items.length,4);assert.ok(result.items.some(i=>i.type==='音频'));
